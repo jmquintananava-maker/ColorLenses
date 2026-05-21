@@ -17,7 +17,7 @@ function App() {
       </h1>
 
       <p style={{ opacity: 0.7 }}>
-        Proyecto React funcionando 🚀
+        Proyecto React 🚀
       </p>
     </div>
   );
