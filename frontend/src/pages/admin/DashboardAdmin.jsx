@@ -833,74 +833,7 @@ function DashboardAdmin() {
             GENERAL SALES TABLE
         ========================= */}
 
-        <div className="recent-sales-card">
-
-          <div className="recent-sales-header">
-
-            <h2>
-              🧾 Historial General de Ventas
-            </h2>
-
-          </div>
-
-          <div className="admin-table-wrapper">
-
-            <table className="admin-table">
-
-              <thead>
-
-                <tr>
-
-                  <th>ID</th>
-
-                  <th>Cliente</th>
-
-                  <th>Total</th>
-
-                  <th>Fecha</th>
-
-                </tr>
-
-              </thead>
-
-              <tbody>
-
-                {allSales.map((sale) => (
-
-                  <tr key={sale.Id}>
-
-                    <td data-label="ID">
-                      {sale.Id}
-                    </td>
-
-                    <td data-label="Cliente">
-                      {sale.FullName}
-                    </td>
-
-                    <td data-label="Total">
-                      $
-                      {Number(
-                        sale.Total || 0
-                      ).toFixed(2)}
-                    </td>
-
-                    <td data-label="Fecha">
-                      {formatDate(
-                        sale.CreatedAt
-                      )}
-                    </td>
-
-                  </tr>
-
-                ))}
-
-              </tbody>
-
-            </table>
-
-          </div>
-
-        </div>
+       
 
         {/* =========================
             TOP CUSTOMERS

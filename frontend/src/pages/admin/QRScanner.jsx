@@ -8,29 +8,68 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 function QRScanner() {
   const [message, setMessage] = useState("");
+  const [cameras, setCameras] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
 
   const scannerRef = useRef(null);
   const isProcessingRef = useRef(false);
 
   useEffect(() => {
-    startScanner();
+    loadCamerasAndStart();
 
     return () => {
       stopScanner();
     };
   }, []);
 
+  const loadCamerasAndStart = async () => {
+    try {
+      const availableCameras = await Html5Qrcode.getCameras();
+
+      if (!availableCameras || availableCameras.length === 0) {
+        setMessage("No se encontró cámara disponible");
+        return;
+      }
+
+      setCameras(availableCameras);
+
+      const backCamera =
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("back")
+        ) ||
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("rear")
+        ) ||
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("environment")
+        );
+
+      const defaultCamera =
+        backCamera || availableCameras[availableCameras.length - 1];
+
+      setSelectedCameraId(defaultCamera.id);
+
+      await startScanner(defaultCamera.id);
+    } catch (err) {
+      console.log("❌ Error cargando cámaras:", err);
+
+      setMessage(
+        "No se pudo acceder a la cámara. Revisa permisos del navegador."
+      );
+    }
+  };
+
   const stopScanner = async () => {
     try {
       if (scannerRef.current) {
-        const state = scannerRef.current.getState?.();
-
-        await scannerRef.current
-          .stop()
-          .catch(() => {});
-
-        scannerRef.current
-          .clear();
+        await scannerRef.current.stop().catch(() => {});
+        scannerRef.current.clear();
 
         scannerRef.current = null;
       }
@@ -39,7 +78,7 @@ function QRScanner() {
     }
   };
 
-  const startScanner = async () => {
+  const startScanner = async (cameraId = null) => {
     try {
       const reader = document.getElementById("reader");
 
@@ -47,29 +86,32 @@ function QRScanner() {
         reader.innerHTML = "";
       }
 
+      await stopScanner();
+
       const scanner = new Html5Qrcode("reader");
 
       scannerRef.current = scanner;
 
-      const cameras = await Html5Qrcode.getCameras();
+      const config = {
+        fps: 10,
+        qrbox: {
+          width: window.innerWidth < 768 ? 260 : 240,
+          height: window.innerWidth < 768 ? 260 : 240
+        },
+        aspectRatio: 1.0
+      };
 
-      if (!cameras || cameras.length === 0) {
-        setMessage("No se encontró cámara disponible");
-        return;
-      }
+      const cameraConfig = cameraId
+        ? cameraId
+        : {
+            facingMode: {
+              exact: "environment"
+            }
+          };
 
       await scanner.start(
-        cameras[0].id,
-
-        {
-          fps: 8,
-
-          qrbox: {
-            width: 240,
-            height: 240
-          }
-        },
-
+        cameraConfig,
+        config,
         async (decodedText) => {
           if (isProcessingRef.current) return;
 
@@ -88,20 +130,35 @@ function QRScanner() {
 
           await validateCustomerQR(cleanQR);
         },
-
         () => {}
       );
     } catch (err) {
-      console.log(err);
-      setMessage("No se pudo acceder a la cámara");
+      console.log("❌ Error startScanner:", err);
+
+      if (!cameraId && selectedCameraId) {
+        await startScanner(selectedCameraId);
+        return;
+      }
+
+      setMessage("No se pudo acceder a la cámara principal");
     }
+  };
+
+  const changeCamera = async (cameraId) => {
+    setSelectedCameraId(cameraId);
+    isProcessingRef.current = false;
+    setMessage("Cambiando cámara...");
+
+    await startScanner(cameraId);
+
+    setMessage("");
   };
 
   const restartScanner = () => {
     isProcessingRef.current = false;
 
     setTimeout(() => {
-      startScanner();
+      startScanner(selectedCameraId);
     }, 800);
   };
 
@@ -184,6 +241,29 @@ function QRScanner() {
             <p>
               Escanea el QR del cliente para iniciar una venta
             </p>
+
+            {cameras.length > 1 && (
+              <div className="camera-select-box">
+                <label>
+                  Cámara
+                </label>
+
+                <select
+                  value={selectedCameraId}
+                  onChange={(e) => changeCamera(e.target.value)}
+                >
+                  {cameras.map((camera, index) => (
+                    <option
+                      key={camera.id}
+                      value={camera.id}
+                    >
+                      {camera.label ||
+                        `Cámara ${index + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div
               id="reader"

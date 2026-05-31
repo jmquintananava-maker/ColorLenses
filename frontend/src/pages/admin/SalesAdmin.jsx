@@ -63,6 +63,12 @@ function SalesAdmin() {
   const [customerHistory, setCustomerHistory] =
     useState([]);
 
+  const [customerPoints, setCustomerPoints] =
+    useState(null);
+
+  const [isSaving, setIsSaving] =
+    useState(false);
+
   /* =========================
      LOAD DATA
   ========================= */
@@ -76,7 +82,7 @@ function SalesAdmin() {
   }, [slug]);
 
   /* =========================
-     LOAD CUSTOMER HISTORY
+     LOAD CUSTOMER DATA
   ========================= */
 
   useEffect(() => {
@@ -87,9 +93,15 @@ function SalesAdmin() {
         selectedCustomer
       );
 
+      loadCustomerPoints(
+        selectedCustomer
+      );
+
     } else {
 
       setCustomerHistory([]);
+
+      setCustomerPoints(null);
 
     }
 
@@ -137,9 +149,27 @@ function SalesAdmin() {
             cameras.length > 0
           ) {
 
+            const backCamera =
+              cameras.find((camera) =>
+                String(camera.label || "")
+                  .toLowerCase()
+                  .includes("back")
+              ) ||
+              cameras.find((camera) =>
+                String(camera.label || "")
+                  .toLowerCase()
+                  .includes("rear")
+              ) ||
+              cameras.find((camera) =>
+                String(camera.label || "")
+                  .toLowerCase()
+                  .includes("environment")
+              ) ||
+              cameras[cameras.length - 1];
+
             await scanner.start(
 
-              cameras[0].id,
+              backCamera.id,
 
               {
                 fps: 10,
@@ -213,9 +243,13 @@ function SalesAdmin() {
       const data =
         await response.json();
 
-      setCustomers(data);
+      setCustomers(
+        Array.isArray(data)
+          ? data
+          : []
+      );
 
-      if (slug) {
+      if (slug && Array.isArray(data)) {
 
         const foundCustomer =
           data.find(
@@ -268,11 +302,70 @@ function SalesAdmin() {
       const data =
         await response.json();
 
-      setProducts(data);
+      setProducts(
+        Array.isArray(data)
+          ? data
+          : []
+      );
 
     } catch (err) {
 
       console.log(err);
+
+    }
+
+  };
+
+  /* =========================
+     LOAD CUSTOMER POINTS
+     Puntos vigentes con vencimiento
+  ========================= */
+
+  const loadCustomerPoints = async (
+    customerId
+  ) => {
+
+    try {
+
+      if (!customerId) {
+
+        setCustomerPoints(null);
+
+        return;
+
+      }
+
+      const response =
+        await fetch(
+          `${API_URL}/api/customers/${customerId}/points`
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+
+        console.log(
+          "❌ Error puntos cliente:",
+          data
+        );
+
+        setCustomerPoints(null);
+
+        return;
+
+      }
+
+      setCustomerPoints(data);
+
+    } catch (err) {
+
+      console.log(
+        "❌ Error loadCustomerPoints:",
+        err
+      );
+
+      setCustomerPoints(null);
 
     }
 
@@ -410,8 +503,18 @@ function SalesAdmin() {
 
   const availablePoints =
     Number(
-      customerData?.Points || 0
+      customerPoints?.AvailablePoints ??
+      customerData?.Points ??
+      0
     );
+
+  const pointsExpiringSoon =
+    Number(
+      customerPoints?.PointsExpiringSoon || 0
+    );
+
+  const nextExpirationDate =
+    customerPoints?.NextExpirationDate || null;
 
   const maxRedeemablePoints =
     Math.min(
@@ -454,6 +557,36 @@ function SalesAdmin() {
       {
         day: "2-digit",
         month: "2-digit",
+        year: "numeric"
+      }
+    );
+
+  };
+
+  const formatExpirationDate = (
+    dateValue
+  ) => {
+
+    if (!dateValue) {
+
+      return "Sin vencimiento cercano";
+
+    }
+
+    const date =
+      new Date(dateValue);
+
+    if (isNaN(date.getTime())) {
+
+      return "Sin vencimiento cercano";
+
+    }
+
+    return date.toLocaleDateString(
+      "es-MX",
+      {
+        day: "2-digit",
+        month: "long",
         year: "numeric"
       }
     );
@@ -758,6 +891,8 @@ function SalesAdmin() {
 
   const registerSale = async () => {
 
+    if (isSaving) return;
+
     if (!selectedCustomer) {
 
       alert(
@@ -812,6 +947,8 @@ function SalesAdmin() {
 
     try {
 
+      setIsSaving(true);
+
       const response =
         await fetch(
 
@@ -842,8 +979,11 @@ function SalesAdmin() {
 
         alert(
           data.message ||
+          data.sqlMessage ||
           "Error al registrar venta"
         );
+
+        setIsSaving(false);
 
         return;
 
@@ -857,7 +997,7 @@ function SalesAdmin() {
 
         finalTotal,
 
-        calculatePoints()
+        data.PointsEarned ?? calculatePoints()
 
       );
 
@@ -869,7 +1009,7 @@ function SalesAdmin() {
 
         finalTotal,
 
-        calculatePoints()
+        data.PointsEarned ?? calculatePoints()
 
       );
 
@@ -881,7 +1021,8 @@ function SalesAdmin() {
 🎁 Puntos canjeados: ${redeemedPoints}
 💸 Descuento: $${Number(discount).toFixed(2)}
 💵 Total pagado: $${Number(finalTotal).toFixed(2)}
-⭐ ${calculatePoints()} puntos generados para próxima compra`
+⭐ ${data.PointsEarned ?? calculatePoints()} puntos generados para próxima compra
+⏳ Los nuevos puntos vencen en 1 año`
 
       );
 
@@ -893,13 +1034,19 @@ function SalesAdmin() {
 
       setSelectedProduct("");
 
-      loadCustomers();
+      await loadCustomers();
 
-      loadProducts();
+      await loadProducts();
 
-      loadCustomerHistory(
+      await loadCustomerHistory(
         selectedCustomer
       );
+
+      await loadCustomerPoints(
+        selectedCustomer
+      );
+
+      setIsSaving(false);
 
     } catch (err) {
 
@@ -908,6 +1055,8 @@ function SalesAdmin() {
       alert(
         "Error al registrar venta"
       );
+
+      setIsSaving(false);
 
     }
 
@@ -1001,7 +1150,7 @@ function SalesAdmin() {
 
           {customerData && (
 
-            <div className="sale-customer-card">
+            <div className="sale-customer-card points-expiration-card">
 
               <h3>
                 {customerData.FullName}
@@ -1014,25 +1163,36 @@ function SalesAdmin() {
               </p>
 
               <p>
-                🎁 Puntos disponibles:
+                🎁 Puntos vigentes:
                 {" "}
-                {availablePoints}
+                <strong>
+                  {availablePoints}
+                </strong>
               </p>
 
               <p>
-                💰 Gastado:
+                ⏳ Próximo vencimiento:
                 {" "}
-                $
-                {Number(
-                  customerData.TotalSpent || 0
-                ).toFixed(2)}
+                <strong>
+                  {formatExpirationDate(
+                    nextExpirationDate
+                  )}
+                </strong>
               </p>
 
-              <p>
-                📦 Visitas:
-                {" "}
-                {customerData.Visits || 0}
-              </p>
+              {pointsExpiringSoon > 0 && (
+
+                <div className="points-warning-box">
+
+                  ⚠️
+                  {" "}
+                  {pointsExpiringSoon}
+                  {" "}
+                  puntos vencen en los próximos 30 días.
+
+                </div>
+
+              )}
 
             </div>
 
@@ -1183,36 +1343,74 @@ function SalesAdmin() {
 
               key={index}
 
-              className="sale-item"
+              className="sale-item sale-item-with-image"
 
             >
 
-              <div>
+              <div className="sale-product-left">
 
-                <strong>
-                  {item.Modelo}
-                </strong>
+                {item.Image ? (
 
-                <p>
-                  Cantidad:
-                  {" "}
-                  {item.Quantity}
-                </p>
+                  <img
 
-                <p>
-                  Precio:
-                  {" "}
-                  $
-                  {Number(
-                    item.Price
-                  ).toFixed(2)}
-                </p>
+                    className="sale-product-image"
 
-                <p>
-                  QR:
-                  {" "}
-                  {item.ProductQR}
-                </p>
+                    src={`${API_URL}${item.Image}`}
+
+                    alt={item.Modelo}
+
+                  />
+
+                ) : (
+
+                  <div className="sale-product-image-placeholder">
+
+                    Sin imagen
+
+                  </div>
+
+                )}
+
+                <div className="sale-product-info">
+
+                  <strong>
+                    {item.Modelo}
+                  </strong>
+
+                  <p>
+                    Marca:
+                    {" "}
+                    {item.Marca || "Sin marca"}
+                  </p>
+
+                  <p>
+                    Color:
+                    {" "}
+                    {item.Color || "Sin color"}
+                  </p>
+
+                  <p>
+                    Cantidad:
+                    {" "}
+                    {item.Quantity}
+                  </p>
+
+                  <p>
+                    Precio:
+                    {" "}
+                    $
+                    {Number(
+                      item.Price
+                    ).toFixed(2)}
+                  </p>
+
+                  <p>
+                    QR:
+                    {" "}
+                    {item.ProductQR}
+                  </p>
+
+                </div>
 
               </div>
 
@@ -1249,7 +1447,7 @@ function SalesAdmin() {
               </p>
 
               <p>
-                Puntos disponibles:
+                Puntos vigentes disponibles:
                 {" "}
                 <strong>
                   {availablePoints}
@@ -1263,6 +1461,34 @@ function SalesAdmin() {
                   {maxRedeemablePoints}
                 </strong>
               </p>
+
+              {nextExpirationDate && (
+
+                <p>
+                  Próximo vencimiento:
+                  {" "}
+                  <strong>
+                    {formatExpirationDate(
+                      nextExpirationDate
+                    )}
+                  </strong>
+                </p>
+
+              )}
+
+              {pointsExpiringSoon > 0 && (
+
+                <div className="points-warning-box">
+
+                  ⚠️ Se recomienda usar primero los
+                  {" "}
+                  {pointsExpiringSoon}
+                  {" "}
+                  puntos próximos a vencer.
+
+                </div>
+
+              )}
 
               <input
 
@@ -1365,6 +1591,12 @@ function SalesAdmin() {
             {" "}
             {calculatePoints()}
 
+            <br />
+
+            <small>
+              Estos puntos vencerán 1 año después de la compra.
+            </small>
+
           </div>
 
           <button
@@ -1373,9 +1605,13 @@ function SalesAdmin() {
 
             onClick={registerSale}
 
+            disabled={isSaving}
+
           >
 
-            Registrar Venta
+            {isSaving
+              ? "Registrando..."
+              : "Registrar Venta"}
 
           </button>
 

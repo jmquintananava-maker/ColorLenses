@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   Plus,
   Pencil,
   Trash2,
   X,
-  RotateCcw
+  RotateCcw,
+  Search
 } from "lucide-react";
 
 import AdminSidebar from "../../components/AdminSidebar";
@@ -27,6 +28,7 @@ const emptyForm = {
 function CustomersAdmin() {
   const [customers, setCustomers] = useState([]);
   const [viewMode, setViewMode] = useState("active");
+  const [search, setSearch] = useState("");
 
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
@@ -51,6 +53,47 @@ function CustomersAdmin() {
       console.log(err);
     }
   };
+
+  const filteredCustomers = useMemo(() => {
+    const searchText = search.toLowerCase().trim();
+
+    if (!searchText) return customers;
+
+    return customers.filter((customer) => {
+      return (
+        String(customer.Id || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.FullName || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Phone || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Email || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Points || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Level || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.TotalSpent || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Visits || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.CardSlug || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Status || "")
+          .toLowerCase()
+          .includes(searchText)
+      );
+    });
+  }, [customers, search]);
 
   const createSlug = (name) => {
     return name
@@ -136,8 +179,8 @@ function CustomersAdmin() {
 
         alert(
           data.sqlMessage ||
-          data.message ||
-          "No se pudo guardar el cliente"
+            data.message ||
+            "No se pudo guardar el cliente"
         );
 
         return;
@@ -173,8 +216,8 @@ function CustomersAdmin() {
 
         alert(
           data.sqlMessage ||
-          data.message ||
-          "No se pudo desactivar el cliente"
+            data.message ||
+            "No se pudo desactivar el cliente"
         );
 
         return;
@@ -211,8 +254,8 @@ function CustomersAdmin() {
 
         alert(
           data.sqlMessage ||
-          data.message ||
-          "No se pudo reactivar el cliente"
+            data.message ||
+            "No se pudo reactivar el cliente"
         );
 
         return;
@@ -241,10 +284,7 @@ function CustomersAdmin() {
             </p>
           </div>
 
-          <button
-            className="admin-add-btn"
-            onClick={openCreateForm}
-          >
+          <button className="admin-add-btn" onClick={openCreateForm}>
             <Plus size={20} />
             Nuevo Cliente
           </button>
@@ -259,6 +299,7 @@ function CustomersAdmin() {
             }
             onClick={() => {
               setViewMode("active");
+              setSearch("");
               setShowForm(false);
               setForm(emptyForm);
               setEditingId(null);
@@ -275,6 +316,7 @@ function CustomersAdmin() {
             }
             onClick={() => {
               setViewMode("inactive");
+              setSearch("");
               setShowForm(false);
               setForm(emptyForm);
               setEditingId(null);
@@ -287,9 +329,7 @@ function CustomersAdmin() {
         {showForm && (
           <div className="admin-form-card">
             <div className="admin-form-header">
-              <h2>
-                {editingId ? "Editar Cliente" : "Nuevo Cliente"}
-              </h2>
+              <h2>{editingId ? "Editar Cliente" : "Nuevo Cliente"}</h2>
 
               <button
                 className="admin-close-btn"
@@ -378,6 +418,33 @@ function CustomersAdmin() {
           </div>
         )}
 
+        <div className="customers-toolbar">
+          <div className="customers-search-box">
+            <Search size={18} />
+
+            <input
+              type="text"
+              placeholder="Buscar cliente por nombre, teléfono, correo, nivel, puntos..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            {search && (
+              <button
+                type="button"
+                className="customers-clear-search"
+                onClick={() => setSearch("")}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          <div className="customers-count-box">
+            {filteredCustomers.length} de {customers.length} clientes
+          </div>
+        </div>
+
         <div className="admin-table-wrapper">
           <table className="admin-table">
             <thead>
@@ -397,56 +464,33 @@ function CustomersAdmin() {
             </thead>
 
             <tbody>
-              {customers.map((customer) => (
+              {filteredCustomers.map((customer) => (
                 <tr key={customer.Id}>
-                  <td data-label="ID">
-                    {customer.Id}
-                  </td>
+                  <td data-label="ID">{customer.Id}</td>
 
-                  <td data-label="Cliente">
-                    {customer.FullName}
-                  </td>
+                  <td data-label="Cliente">{customer.FullName}</td>
 
-                  <td data-label="Teléfono">
-                    {customer.Phone}
-                  </td>
+                  <td data-label="Teléfono">{customer.Phone}</td>
 
-                  <td data-label="Email">
-                    {customer.Email}
-                  </td>
+                  <td data-label="Email">{customer.Email}</td>
 
-                  <td data-label="Puntos">
-                    🎁 {customer.Points || 0}
-                  </td>
+                  <td data-label="Puntos">🎁 {customer.Points || 0}</td>
 
-                  <td data-label="Nivel">
-                    ⭐ {customer.Level || "Silver"}
-                  </td>
+                  <td data-label="Nivel">⭐ {customer.Level || "Silver"}</td>
 
                   <td data-label="Gastado">
-                    $
-                    {Number(
-                      customer.TotalSpent || 0
-                    ).toFixed(2)}
+                    ${Number(customer.TotalSpent || 0).toFixed(2)}
                   </td>
 
-                  <td data-label="Visitas">
-                    📦 {customer.Visits || 0}
-                  </td>
+                  <td data-label="Visitas">📦 {customer.Visits || 0}</td>
 
                   <td data-label="Tarjeta">
-                    <a
-                      href={customer.QRCode}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
+                    <a href={customer.QRCode} target="_blank" rel="noreferrer">
                       {customer.CardSlug}
                     </a>
                   </td>
 
-                  <td data-label="Status">
-                    {customer.Status || "Activo"}
-                  </td>
+                  <td data-label="Status">{customer.Status || "Activo"}</td>
 
                   <td data-label="Acciones">
                     <div className="admin-actions">
@@ -460,18 +504,14 @@ function CustomersAdmin() {
                       {viewMode === "active" ? (
                         <button
                           className="delete-btn"
-                          onClick={() =>
-                            deleteCustomer(customer.Id)
-                          }
+                          onClick={() => deleteCustomer(customer.Id)}
                         >
                           <Trash2 size={16} />
                         </button>
                       ) : (
                         <button
                           className="edit-btn"
-                          onClick={() =>
-                            reactivateCustomer(customer.Id)
-                          }
+                          onClick={() => reactivateCustomer(customer.Id)}
                           title="Reactivar cliente"
                         >
                           <RotateCcw size={16} />
@@ -482,15 +522,14 @@ function CustomersAdmin() {
                 </tr>
               ))}
 
-              {customers.length === 0 && (
+              {filteredCustomers.length === 0 && (
                 <tr>
-                  <td
-                    colSpan="11"
-                    data-label="Clientes"
-                  >
-                    {viewMode === "active"
-                      ? "No hay clientes activos."
-                      : "No hay clientes inactivos."}
+                  <td colSpan="11" data-label="Clientes">
+                    {search
+                      ? "No se encontraron clientes con esa búsqueda."
+                      : viewMode === "active"
+                        ? "No hay clientes activos."
+                        : "No hay clientes inactivos."}
                   </td>
                 </tr>
               )}

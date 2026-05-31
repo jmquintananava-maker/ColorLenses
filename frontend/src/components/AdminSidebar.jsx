@@ -31,6 +31,10 @@ function AdminSidebar() {
       path: "/admin/sales"
     },
     {
+      name: "Historial de Ventas",
+      path: "/admin/sales-history"
+    },
+    {
       name: "Escanear QR",
       path: "/admin/scan"
     }

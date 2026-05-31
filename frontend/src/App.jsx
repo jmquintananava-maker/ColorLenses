@@ -3,6 +3,7 @@ import {
   Route
 } from "react-router-dom";
 
+import SalesHistoryAdmin from "./pages/admin/SalesHistoryAdmin";
 import CustomersAdmin from "./pages/admin/CustomersAdmin";
 import ProductsAdmin from "./pages/admin/ProductsAdmin";
 import Home from "./pages/Home";
@@ -15,6 +16,7 @@ import DashboardAdmin from "./pages/admin/DashboardAdmin";
 import LoginAdmin from "./pages/admin/LoginAdmin";
 import PrivateRoute from "./components/PrivateRoute";
 
+
 function App() {
   return (
     <Routes>
@@ -24,6 +26,11 @@ function App() {
         path="/"
         element={<Home />}
       />
+
+      <Route
+      path="/admin/sales-history"
+      element={<SalesHistoryAdmin />}
+    />
 
       <Route
         path="/catalog"

@@ -59,6 +59,25 @@ const safeNumber = (value) => {
     : Number(value);
 };
 
+const calculatePointsByLevel = (total, level) => {
+  const cleanTotal = safeNumber(total);
+  const cleanLevel = level || "Silver";
+
+  if (cleanLevel === "Silver") {
+    return Math.floor(cleanTotal / 50);
+  }
+
+  if (cleanLevel === "Gold") {
+    return Math.floor(cleanTotal / 30);
+  }
+
+  if (cleanLevel === "Black") {
+    return Math.floor(cleanTotal / 10);
+  }
+
+  return Math.floor(cleanTotal / 50);
+};
+
 /* =========================
    MULTER STORAGE
 ========================= */
@@ -350,6 +369,8 @@ app.put("/api/products/:id/reactivate", async (req, res) => {
 
 app.get("/api/customers", async (req, res) => {
   try {
+    await db.execute("CALL ExpireAllCustomerPoints()");
+
     const [rows] =
       await db.execute(
         "CALL GetCustomers()"
@@ -435,6 +456,11 @@ app.put("/api/customers/:id", async (req, res) => {
       ]
     );
 
+    await db.execute(
+      "CALL RecalculateCustomerPoints(?)",
+      [id]
+    );
+
     res.json({
       success: true,
       message: "✅ Cliente actualizado"
@@ -474,6 +500,8 @@ app.delete("/api/customers/:id", async (req, res) => {
 
 app.get("/api/customers-inactive", async (req, res) => {
   try {
+    await db.execute("CALL ExpireAllCustomerPoints()");
+
     const [rows] =
       await db.execute(
         "CALL GetInactiveCustomers()"
@@ -499,6 +527,11 @@ app.put("/api/customers/:id/reactivate", async (req, res) => {
       [id]
     );
 
+    await db.execute(
+      "CALL RecalculateCustomerPoints(?)",
+      [id]
+    );
+
     res.json({
       success: true,
       message: "✅ Cliente reactivado"
@@ -506,6 +539,75 @@ app.put("/api/customers/:id/reactivate", async (req, res) => {
   } catch (err) {
     console.log("❌ Reactivate customer error:", err);
     res.status(500).json(err);
+  }
+});
+
+/* =========================
+   CUSTOMER POINTS API
+========================= */
+
+app.get("/api/customers/:id/points", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] =
+      await db.execute(
+        "CALL GetCustomerAvailablePoints(?)",
+        [id]
+      );
+
+    res.json(rows[0][0]);
+  } catch (err) {
+    console.log("❌ Get customer points error:", err);
+
+    res.status(500).json({
+      message: "Error consultando puntos del cliente",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.get("/api/customers/:id/points/lots", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] =
+      await db.execute(
+        "CALL GetCustomerPointsLots(?)",
+        [id]
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get customer point lots error:", err);
+
+    res.status(500).json({
+      message: "Error consultando historial de puntos",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.post("/api/points/expire", async (req, res) => {
+  try {
+    await db.execute(
+      "CALL ExpireAllCustomerPoints()"
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Puntos vencidos actualizados"
+    });
+  } catch (err) {
+    console.log("❌ Expire points error:", err);
+
+    res.status(500).json({
+      message: "Error expirando puntos",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
 
@@ -573,10 +675,34 @@ app.post("/api/customers/validate-qr", async (req, res) => {
       });
     }
 
+    await db.execute(
+      "CALL RecalculateCustomerPoints(?)",
+      [customer.Id]
+    );
+
+    const [pointRows] =
+      await db.execute(
+        "CALL GetCustomerAvailablePoints(?)",
+        [customer.Id]
+      );
+
+    const pointsData =
+      pointRows[0][0];
+
     res.json({
       status: "active",
       message: "Cliente activo",
-      customer
+      customer: {
+        ...customer,
+        Points:
+          pointsData?.AvailablePoints ??
+          customer.Points ??
+          0,
+        NextExpirationDate:
+          pointsData?.NextExpirationDate || null,
+        PointsExpiringSoon:
+          pointsData?.PointsExpiringSoon || 0
+      }
     });
   } catch (err) {
     console.log("❌ Validate customer QR error:", err);
@@ -584,7 +710,8 @@ app.post("/api/customers/validate-qr", async (req, res) => {
     res.status(500).json({
       status: "error",
       message: "Error validando cliente",
-      error: err
+      error: err.message,
+      sqlMessage: err.sqlMessage
     });
   }
 });
@@ -626,11 +753,16 @@ app.get("/api/sales/:id", async (req, res) => {
 
 /* =========================
    REGISTER SALE
-   WITH POINTS REDEMPTION
+   WITH POINTS EXPIRATION
 ========================= */
 
 app.post("/api/sales", async (req, res) => {
+  const connection =
+    await db.getConnection();
+
   try {
+    await connection.beginTransaction();
+
     const {
       CustomerId,
       Subtotal,
@@ -661,26 +793,33 @@ app.post("/api/sales", async (req, res) => {
         : [];
 
     if (!cleanCustomerId) {
+      await connection.rollback();
+
       return res.status(400).json({
         message: "Cliente requerido"
       });
     }
 
     if (cleanCart.length === 0) {
+      await connection.rollback();
+
       return res.status(400).json({
         message: "Carrito vacío"
       });
     }
 
     const [customerRows] =
-      await db.execute(
+      await connection.execute(
         `
         SELECT
           Id,
+          FullName,
           Points,
-          Status
+          Status,
+          Level
         FROM Customers
         WHERE Id = ?
+        LIMIT 1
         `,
         [cleanCustomerId]
       );
@@ -689,29 +828,54 @@ app.post("/api/sales", async (req, res) => {
       customerRows[0];
 
     if (!customer) {
+      await connection.rollback();
+
       return res.status(404).json({
         message: "Cliente no encontrado"
       });
     }
 
     if (customer.Status === "Inactivo") {
+      await connection.rollback();
+
       return res.status(403).json({
         message:
           "Este cliente está inactivo y no puede realizar compras."
       });
     }
 
+    await connection.execute(
+      "CALL RecalculateCustomerPoints(?)",
+      [cleanCustomerId]
+    );
+
+    const [pointsRows] =
+      await connection.execute(
+        "CALL GetCustomerAvailablePoints(?)",
+        [cleanCustomerId]
+      );
+
+    const pointsData =
+      pointsRows[0][0];
+
     const currentPoints =
-      safeNumber(customer.Points);
+      safeNumber(
+        pointsData?.AvailablePoints ??
+        customer.Points
+      );
 
     if (cleanRedeemedPoints > currentPoints) {
+      await connection.rollback();
+
       return res.status(400).json({
         message:
-          "El cliente no tiene suficientes puntos para canjear."
+          "El cliente no tiene suficientes puntos vigentes para canjear."
       });
     }
 
     if (cleanRedeemedPoints > cleanSubtotal) {
+      await connection.rollback();
+
       return res.status(400).json({
         message:
           "No puedes canjear más puntos que el subtotal de la venta."
@@ -719,6 +883,8 @@ app.post("/api/sales", async (req, res) => {
     }
 
     if (cleanDiscount !== cleanRedeemedPoints) {
+      await connection.rollback();
+
       return res.status(400).json({
         message:
           "El descuento debe ser igual a los puntos canjeados."
@@ -732,14 +898,83 @@ app.post("/api/sales", async (req, res) => {
       Number(expectedTotal.toFixed(2)) !==
       Number(cleanTotal.toFixed(2))
     ) {
+      await connection.rollback();
+
       return res.status(400).json({
         message:
           "El total no coincide con subtotal menos descuento."
       });
     }
 
+    for (const item of cleanCart) {
+      const productId =
+        safeNumber(
+          item.Id ||
+          item.ProductId
+        );
+
+      const quantity =
+        safeNumber(
+          item.Quantity || 1
+        );
+
+      const price =
+        safeNumber(item.Price);
+
+      if (!productId || quantity <= 0 || price <= 0) {
+        await connection.rollback();
+
+        return res.status(400).json({
+          message: "Producto inválido en el carrito",
+          item
+        });
+      }
+
+      const [productRows] =
+        await connection.execute(
+          `
+          SELECT
+            Id,
+            Modelo,
+            Stock,
+            Status
+          FROM Products
+          WHERE Id = ?
+          LIMIT 1
+          `,
+          [productId]
+        );
+
+      const product =
+        productRows[0];
+
+      if (!product) {
+        await connection.rollback();
+
+        return res.status(404).json({
+          message: `Producto ${productId} no encontrado`
+        });
+      }
+
+      if (product.Status === "Inactivo") {
+        await connection.rollback();
+
+        return res.status(400).json({
+          message: `El producto ${product.Modelo || productId} está inactivo`
+        });
+      }
+
+      if (safeNumber(product.Stock) < quantity) {
+        await connection.rollback();
+
+        return res.status(400).json({
+          message: `Stock insuficiente para ${product.Modelo || productId}`
+        });
+      }
+    }
+
     const [saleRows] =
-      await db.execute(
+      await connection.execute(
         "CALL RegisterSaleWithRedemption(?,?,?,?,?)",
         [
           cleanCustomerId,
@@ -751,17 +986,34 @@ app.post("/api/sales", async (req, res) => {
       );
 
     const saleData =
-      saleRows[0][0];
+      saleRows?.[0]?.[0] || {};
 
     const saleId =
-      saleData.SaleId;
+      saleData.SaleId ||
+      saleData.Id ||
+      saleData.NewSaleId;
+
+    if (!saleId) {
+      await connection.rollback();
+
+      return res.status(500).json({
+        message:
+          "La venta se creó pero no se recibió SaleId desde RegisterSaleWithRedemption.",
+        saleData
+      });
+    }
 
     for (const item of cleanCart) {
       const productId =
-        safeNumber(item.Id);
+        safeNumber(
+          item.Id ||
+          item.ProductId
+        );
 
       const quantity =
-        safeNumber(item.Quantity || 1);
+        safeNumber(
+          item.Quantity || 1
+        );
 
       const price =
         safeNumber(item.Price);
@@ -769,7 +1021,7 @@ app.post("/api/sales", async (req, res) => {
       const itemSubtotal =
         price * quantity;
 
-      await db.execute(
+      await connection.execute(
         "CALL CreateSaleItem(?,?,?,?,?)",
         [
           saleId,
@@ -780,7 +1032,7 @@ app.post("/api/sales", async (req, res) => {
         ]
       );
 
-      await db.execute(
+      await connection.execute(
         "CALL UpdateProductStock(?,?)",
         [
           productId,
@@ -789,22 +1041,49 @@ app.post("/api/sales", async (req, res) => {
       );
     }
 
-    let pointsEarned = 0;
+    const pointsEarned =
+      calculatePointsByLevel(
+        cleanTotal,
+        customer.Level
+      );
 
-    if (cleanTotal >= 50) {
-      pointsEarned =
-        Math.floor(cleanTotal / 50);
-    }
-
-    await db.execute(
+    await connection.execute(
       "CALL UpdateCustomerStatsWithRedemption(?,?,?,?)",
       [
         cleanCustomerId,
         cleanTotal,
-        pointsEarned,
-        cleanRedeemedPoints
+        0,
+        0
       ]
     );
+
+    if (cleanRedeemedPoints > 0) {
+      await connection.execute(
+        "CALL RedeemCustomerPoints(?,?)",
+        [
+          cleanCustomerId,
+          cleanRedeemedPoints
+        ]
+      );
+    }
+
+    if (pointsEarned > 0) {
+      await connection.execute(
+        "CALL AddCustomerPoints(?,?,?)",
+        [
+          cleanCustomerId,
+          saleId,
+          pointsEarned
+        ]
+      );
+    }
+
+    await connection.execute(
+      "CALL RecalculateCustomerPoints(?)",
+      [cleanCustomerId]
+    );
+
+    await connection.commit();
 
     res.json({
       success: true,
@@ -814,11 +1093,28 @@ app.post("/api/sales", async (req, res) => {
       RedeemedPoints: cleanRedeemedPoints,
       Total: cleanTotal,
       PointsEarned: pointsEarned,
+      PointsExpiresAt:
+        pointsEarned > 0
+          ? new Date(
+              Date.now() +
+              365 * 24 * 60 * 60 * 1000
+            )
+          : null,
       message: "✅ Venta registrada"
     });
   } catch (err) {
+    await connection.rollback();
+
     console.log("❌ Error register sale:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error al registrar venta",
+      error: err.message,
+      code: err.code,
+      sqlMessage: err.sqlMessage
+    });
+  } finally {
+    connection.release();
   }
 });
 
