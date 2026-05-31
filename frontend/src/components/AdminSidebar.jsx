@@ -13,32 +13,36 @@ function AdminSidebar() {
 
   const [open, setOpen] = useState(false);
 
-  const menu = [
-    {
-      name: "Dashboard",
-      path: "/admin"
-    },
-    {
-      name: "Productos",
-      path: "/admin/products"
-    },
-    {
-      name: "Clientes",
-      path: "/admin/customers"
-    },
-    {
-      name: "Ventas",
-      path: "/admin/sales"
-    },
-    {
-      name: "Historial de Ventas",
-      path: "/admin/sales-history"
-    },
-    {
-      name: "Escanear QR",
-      path: "/admin/scan"
-    }
-  ];
+ const menu = [
+  {
+    name: "Vender QR",
+    path: "/admin/scan"
+  },
+  {
+    name: "Vender",
+    path: "/admin/sales"
+  },
+  {
+    name: "Clientes",
+    path: "/admin/customers"
+  },
+  {
+    name: "Productos",
+    path: "/admin/products"
+  },
+  {
+    name: "Dashboard",
+    path: "/admin"
+  },
+  {
+    name: "Historial de Ventas",
+    path: "/admin/sales-history"
+  },
+  {
+    name: "Configuración",
+    path: "/admin/settings"
+  }
+];
 
   const logout = () => {
     const confirmLogout = window.confirm(

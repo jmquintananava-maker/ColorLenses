@@ -15,6 +15,7 @@ import QRScanner from "./pages/admin/QRScanner";
 import DashboardAdmin from "./pages/admin/DashboardAdmin";
 import LoginAdmin from "./pages/admin/LoginAdmin";
 import PrivateRoute from "./components/PrivateRoute";
+import SettingsAdmin from "./pages/admin/SettingsAdmin";
 
 
 function App() {
@@ -36,6 +37,11 @@ function App() {
         path="/catalog"
         element={<Catalog />}
       />
+
+      <Route
+      path="/admin/settings"
+      element={<SettingsAdmin />}
+    />
 
       <Route
         path="/favorites"

@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useParams } from "react-router-dom";
 
 import {
   Trash2,
   Plus,
-  ScanLine
+  Minus,
+  ScanLine,
+  Search
 } from "lucide-react";
 
 import {
@@ -42,7 +44,10 @@ function SalesAdmin() {
   const [selectedCustomer, setSelectedCustomer] =
     useState("");
 
-  const [selectedProduct, setSelectedProduct] =
+  const [customerSearch, setCustomerSearch] =
+    useState("");
+
+  const [productSearch, setProductSearch] =
     useState("");
 
   const [cart, setCart] =
@@ -60,6 +65,12 @@ function SalesAdmin() {
   const [scannerMessage, setScannerMessage] =
     useState("");
 
+  const [productCameras, setProductCameras] =
+    useState([]);
+
+  const [selectedProductCameraId, setSelectedProductCameraId] =
+    useState("");
+
   const [customerHistory, setCustomerHistory] =
     useState([]);
 
@@ -68,6 +79,12 @@ function SalesAdmin() {
 
   const [isSaving, setIsSaving] =
     useState(false);
+
+  const productScannerRef =
+    useRef(null);
+
+  const productScanProcessingRef =
+    useRef(false);
 
   /* =========================
      LOAD DATA
@@ -118,114 +135,283 @@ function SalesAdmin() {
     if (!showProductScanner)
       return;
 
-    let scanner = null;
-
-    const startScanner =
-      async () => {
-
-        try {
-
-          const reader =
-            document.getElementById(
-              "product-reader"
-            );
-
-          if (reader) {
-
-            reader.innerHTML = "";
-
-          }
-
-          scanner =
-            new Html5Qrcode(
-              "product-reader"
-            );
-
-          const cameras =
-            await Html5Qrcode.getCameras();
-
-          if (
-            cameras &&
-            cameras.length > 0
-          ) {
-
-            const backCamera =
-              cameras.find((camera) =>
-                String(camera.label || "")
-                  .toLowerCase()
-                  .includes("back")
-              ) ||
-              cameras.find((camera) =>
-                String(camera.label || "")
-                  .toLowerCase()
-                  .includes("rear")
-              ) ||
-              cameras.find((camera) =>
-                String(camera.label || "")
-                  .toLowerCase()
-                  .includes("environment")
-              ) ||
-              cameras[cameras.length - 1];
-
-            await scanner.start(
-
-              backCamera.id,
-
-              {
-                fps: 10,
-
-                qrbox: {
-                  width: 220,
-                  height: 220
-                }
-              },
-
-              async (decodedText) => {
-
-                await handleProductQR(
-                  decodedText
-                );
-
-              },
-
-              () => {}
-
-            );
-
-          }
-
-        } catch (err) {
-
-          console.log(err);
-
-          setScannerMessage(
-            "No se pudo abrir la cámara"
-          );
-
-        }
-
-      };
-
-    startScanner();
+    loadProductCamerasAndStart();
 
     return () => {
-
-      if (scanner) {
-
-        scanner
-          .stop()
-          .then(() => {
-
-            scanner.clear();
-
-          })
-          .catch(() => {});
-
-      }
-
+      stopProductScanner();
     };
 
   }, [showProductScanner]);
+
+  const loadProductCamerasAndStart = async () => {
+
+    try {
+
+      productScanProcessingRef.current = false;
+
+      const availableCameras =
+        await Html5Qrcode.getCameras();
+
+      if (
+        !availableCameras ||
+        availableCameras.length === 0
+      ) {
+
+        setScannerMessage(
+          "No se encontró cámara disponible"
+        );
+
+        return;
+
+      }
+
+      setProductCameras(
+        availableCameras
+      );
+
+      const backCamera =
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("back")
+        ) ||
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("rear")
+        ) ||
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("environment")
+        );
+
+      const defaultCamera =
+        backCamera ||
+        availableCameras[
+          availableCameras.length - 1
+        ];
+
+      setSelectedProductCameraId(
+        defaultCamera.id
+      );
+
+      await startProductScanner(
+        defaultCamera.id
+      );
+
+    } catch (err) {
+
+      console.log(
+        "❌ Error cargando cámaras producto:",
+        err
+      );
+
+      setScannerMessage(
+        "No se pudo acceder a la cámara. Revisa permisos del navegador."
+      );
+
+    }
+
+  };
+
+  const stopProductScanner = async () => {
+
+    try {
+
+      if (productScannerRef.current) {
+
+        await productScannerRef.current
+          .stop()
+          .catch(() => {});
+
+        productScannerRef.current.clear();
+
+        productScannerRef.current = null;
+
+      }
+
+    } catch (err) {
+
+      console.log(
+        "Scanner producto ya estaba detenido:",
+        err
+      );
+
+    }
+
+  };
+
+  const startProductScanner = async (
+    cameraId = null
+  ) => {
+
+    try {
+
+      const reader =
+        document.getElementById(
+          "product-reader"
+        );
+
+      if (reader) {
+        reader.innerHTML = "";
+      }
+
+      await stopProductScanner();
+
+      productScanProcessingRef.current = false;
+
+      const scanner =
+        new Html5Qrcode(
+          "product-reader"
+        );
+
+      productScannerRef.current =
+        scanner;
+
+      const config = {
+        fps: 10,
+
+        qrbox: {
+          width:
+            window.innerWidth < 768
+              ? 260
+              : 220,
+
+          height:
+            window.innerWidth < 768
+              ? 260
+              : 220
+        },
+
+        aspectRatio: 1.0
+      };
+
+      const cameraConfig =
+        cameraId
+          ? cameraId
+          : {
+              facingMode: {
+                exact: "environment"
+              }
+            };
+
+      await scanner.start(
+        cameraConfig,
+        config,
+
+        async (decodedText) => {
+
+          if (
+            productScanProcessingRef.current
+          ) return;
+
+          productScanProcessingRef.current =
+            true;
+
+          const cleanCode =
+            String(decodedText || "").trim();
+
+          if (!cleanCode) {
+
+            productScanProcessingRef.current =
+              false;
+
+            return;
+
+          }
+
+          setScannerMessage(
+            `Leyendo: ${cleanCode}`
+          );
+
+          await handleProductQR(
+            cleanCode
+          );
+
+        },
+
+        () => {}
+      );
+
+    } catch (err) {
+
+      console.log(
+        "❌ Error startProductScanner:",
+        err
+      );
+
+      if (
+        !cameraId &&
+        selectedProductCameraId
+      ) {
+
+        await startProductScanner(
+          selectedProductCameraId
+        );
+
+        return;
+
+      }
+
+      setScannerMessage(
+        "No se pudo acceder a la cámara principal"
+      );
+
+    }
+
+  };
+
+  const changeProductCamera = async (
+    cameraId
+  ) => {
+
+    setSelectedProductCameraId(
+      cameraId
+    );
+
+    productScanProcessingRef.current =
+      false;
+
+    setScannerMessage(
+      "Cambiando cámara..."
+    );
+
+    await startProductScanner(
+      cameraId
+    );
+
+    setScannerMessage("");
+
+  };
+
+  const closeProductScanner = async () => {
+
+    await stopProductScanner();
+
+    productScanProcessingRef.current =
+      false;
+
+    setScannerMessage("");
+
+    setShowProductScanner(false);
+
+  };
+
+  const restartProductScanner = () => {
+
+    productScanProcessingRef.current =
+      false;
+
+    setTimeout(() => {
+
+      startProductScanner(
+        selectedProductCameraId
+      );
+
+    }, 800);
+
+  };
 
   /* =========================
      LOAD CUSTOMERS
@@ -253,25 +439,24 @@ function SalesAdmin() {
 
         const foundCustomer =
           data.find(
-
             (item) =>
-
               item.CardSlug
                 ?.trim()
                 .toLowerCase()
-
               ===
-
               slug
                 ?.trim()
                 .toLowerCase()
-
           );
 
         if (foundCustomer) {
 
           setSelectedCustomer(
             foundCustomer.Id
+          );
+
+          setCustomerSearch(
+            foundCustomer.FullName || ""
           );
 
         }
@@ -318,7 +503,6 @@ function SalesAdmin() {
 
   /* =========================
      LOAD CUSTOMER POINTS
-     Puntos vigentes con vencimiento
   ========================= */
 
   const loadCustomerPoints = async (
@@ -434,45 +618,22 @@ function SalesAdmin() {
         if (!acc[saleId]) {
 
           acc[saleId] = {
-
-            SaleId:
-              item.SaleId,
-
-            Total:
-              item.Total,
-
-            CreatedAt:
-              item.CreatedAt,
-
+            SaleId: item.SaleId,
+            Total: item.Total,
+            CreatedAt: item.CreatedAt,
             Products: []
-
           };
 
         }
 
         acc[saleId].Products.push({
-
-          Modelo:
-            item.Modelo,
-
-          Marca:
-            item.Marca,
-
-          Color:
-            item.Color,
-
-          Image:
-            item.Image,
-
-          Quantity:
-            item.Quantity,
-
-          Price:
-            item.Price,
-
-          Subtotal:
-            item.Subtotal
-
+          Modelo: item.Modelo,
+          Marca: item.Marca,
+          Color: item.Color,
+          Image: item.Image,
+          Quantity: item.Quantity,
+          Price: item.Price,
+          Subtotal: item.Subtotal
         });
 
         return acc;
@@ -486,7 +647,8 @@ function SalesAdmin() {
       groupedHistory
     ).sort(
       (a, b) =>
-        Number(b.SaleId) - Number(a.SaleId)
+        Number(b.SaleId) -
+        Number(a.SaleId)
     );
 
   /* =========================
@@ -495,10 +657,9 @@ function SalesAdmin() {
 
   const customerData =
     customers.find(
-
       (item) =>
-        item.Id == selectedCustomer
-
+        String(item.Id) ===
+        String(selectedCustomer)
     );
 
   const availablePoints =
@@ -531,6 +692,99 @@ function SalesAdmin() {
       0
     );
 
+  const filteredCustomers =
+    customers.filter((customer) => {
+
+      const searchText =
+        customerSearch
+          .toLowerCase()
+          .trim();
+
+      if (!searchText) {
+        return true;
+      }
+
+      return (
+        String(customer.FullName || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Phone || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Email || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Level || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.Points || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.CardSlug || "")
+          .toLowerCase()
+          .includes(searchText)
+      );
+
+    });
+
+  const filteredProducts =
+    products.filter((product) => {
+
+      const searchText =
+        productSearch
+          .toLowerCase()
+          .trim();
+
+      if (!searchText) {
+        return true;
+      }
+
+      return (
+        String(product.Modelo || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(product.Marca || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(product.Color || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(product.Category || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(product.Price || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(product.Stock || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(product.ProductQR || "")
+          .toLowerCase()
+          .includes(searchText)
+      );
+
+    });
+
+  const selectCustomerFromSearch = (customer) => {
+
+    setSelectedCustomer(
+      customer.Id
+    );
+
+    setCustomerSearch(
+      customer.FullName || ""
+    );
+
+  };
+
+  const selectProductFromSearch = (product) => {
+
+    addProductToCart(product);
+
+    setProductSearch("");
+
+  };
+
   /* =========================
      DATE FORMAT
   ========================= */
@@ -538,18 +792,14 @@ function SalesAdmin() {
   const formatDate = (dateValue) => {
 
     if (!dateValue) {
-
       return "Sin fecha";
-
     }
 
     const date =
       new Date(dateValue);
 
     if (isNaN(date.getTime())) {
-
       return "Sin fecha";
-
     }
 
     return date.toLocaleDateString(
@@ -568,18 +818,14 @@ function SalesAdmin() {
   ) => {
 
     if (!dateValue) {
-
       return "Sin vencimiento cercano";
-
     }
 
     const date =
       new Date(dateValue);
 
     if (isNaN(date.getTime())) {
-
       return "Sin vencimiento cercano";
-
     }
 
     return date.toLocaleDateString(
@@ -594,151 +840,7 @@ function SalesAdmin() {
   };
 
   /* =========================
-     ADD PRODUCT TO CART
-  ========================= */
-
-  const addProductToCart = (
-    product
-  ) => {
-
-    if (!product)
-      return;
-
-    const existing =
-      cart.find(
-
-        (item) =>
-          item.Id == product.Id
-
-      );
-
-    let updatedCart = [];
-
-    if (existing) {
-
-      updatedCart =
-        cart.map((item) => {
-
-          if (
-            item.Id == product.Id
-          ) {
-
-            return {
-
-              ...item,
-
-              Quantity:
-                Number(item.Quantity) + 1
-
-            };
-
-          }
-
-          return item;
-
-        });
-
-    } else {
-
-      updatedCart = [
-
-        ...cart,
-
-        {
-
-          ...product,
-
-          Quantity: 1
-
-        }
-
-      ];
-
-    }
-
-    setCart(updatedCart);
-
-    calculateSubtotal(updatedCart);
-
-  };
-
-  /* =========================
-     ADD MANUAL PRODUCT
-  ========================= */
-
-  const addManualProduct = () => {
-
-    const product =
-      products.find(
-
-        (item) =>
-          item.Id == selectedProduct
-
-      );
-
-    if (!product)
-      return;
-
-    addProductToCart(product);
-
-    setSelectedProduct("");
-
-  };
-
-  /* =========================
-     HANDLE PRODUCT QR
-  ========================= */
-
-  const handleProductQR = async (
-    code
-  ) => {
-
-    try {
-
-      setScannerMessage(
-        `Leyendo: ${code}`
-      );
-
-      const response =
-        await fetch(
-          `${API_URL}/api/products/qr/${code}`
-        );
-
-      if (!response.ok) {
-
-        setScannerMessage(
-          "Producto no encontrado"
-        );
-
-        return;
-
-      }
-
-      const product =
-        await response.json();
-
-      addProductToCart(product);
-
-      setScannerMessage(
-        `✅ Agregado: ${product.Modelo}`
-      );
-
-      setShowProductScanner(false);
-
-    } catch (err) {
-
-      console.log(err);
-
-      setScannerMessage(
-        "Error al escanear producto"
-      );
-
-    }
-
-  };
-
-  /* =========================
-     CALCULATE SUBTOTAL
+     CART HELPERS
   ========================= */
 
   const calculateSubtotal = (
@@ -750,11 +852,8 @@ function SalesAdmin() {
     items.forEach((item) => {
 
       sum +=
-
         Number(item.Price)
-
         *
-
         Number(item.Quantity);
 
     });
@@ -778,9 +877,184 @@ function SalesAdmin() {
 
   };
 
-  /* =========================
-     REMOVE PRODUCT
-  ========================= */
+  const getProductStock = (product) => {
+
+    return Number(
+      product.Stock ?? 0
+    );
+
+  };
+
+  const addProductToCart = (
+    product
+  ) => {
+
+    if (!product)
+      return;
+
+    const stock =
+      getProductStock(product);
+
+    if (stock <= 0) {
+
+      alert(
+        "Este producto no tiene stock disponible"
+      );
+
+      return;
+
+    }
+
+    const existing =
+      cart.find(
+        (item) =>
+          item.Id == product.Id
+      );
+
+    let updatedCart = [];
+
+    if (existing) {
+
+      if (
+        Number(existing.Quantity) >= stock
+      ) {
+
+        alert(
+          `No puedes agregar más unidades. Stock disponible: ${stock}`
+        );
+
+        return;
+
+      }
+
+      updatedCart =
+        cart.map((item) => {
+
+          if (
+            item.Id == product.Id
+          ) {
+
+            return {
+              ...item,
+              Quantity:
+                Number(item.Quantity) + 1
+            };
+
+          }
+
+          return item;
+
+        });
+
+    } else {
+
+      updatedCart = [
+        ...cart,
+        {
+          ...product,
+          Quantity: 1
+        }
+      ];
+
+    }
+
+    setCart(updatedCart);
+
+    calculateSubtotal(updatedCart);
+
+  };
+
+  const updateCartQuantity = (
+    index,
+    newQuantity
+  ) => {
+
+    const currentItem =
+      cart[index];
+
+    if (!currentItem)
+      return;
+
+    const stock =
+      getProductStock(currentItem);
+
+    let cleanQuantity =
+      Number(newQuantity || 0);
+
+    if (cleanQuantity <= 0) {
+
+      removeProduct(index);
+
+      return;
+
+    }
+
+    if (cleanQuantity > stock) {
+
+      cleanQuantity =
+        stock;
+
+      alert(
+        `Stock máximo disponible: ${stock}`
+      );
+
+    }
+
+    const updatedCart =
+      cart.map((item, itemIndex) => {
+
+        if (itemIndex === index) {
+
+          return {
+            ...item,
+            Quantity: cleanQuantity
+          };
+
+        }
+
+        return item;
+
+      });
+
+    setCart(updatedCart);
+
+    calculateSubtotal(updatedCart);
+
+  };
+
+  const increaseProductQuantity = (
+    index
+  ) => {
+
+    const item =
+      cart[index];
+
+    if (!item)
+      return;
+
+    updateCartQuantity(
+      index,
+      Number(item.Quantity) + 1
+    );
+
+  };
+
+  const decreaseProductQuantity = (
+    index
+  ) => {
+
+    const item =
+      cart[index];
+
+    if (!item)
+      return;
+
+    updateCartQuantity(
+      index,
+      Number(item.Quantity) - 1
+    );
+
+  };
 
   const removeProduct = (
     index
@@ -788,15 +1062,87 @@ function SalesAdmin() {
 
     const updatedCart =
       cart.filter(
-
         (_, i) =>
           i !== index
-
       );
 
     setCart(updatedCart);
 
     calculateSubtotal(updatedCart);
+
+  };
+
+  /* =========================
+     HANDLE PRODUCT QR
+  ========================= */
+
+  const handleProductQR = async (
+    code
+  ) => {
+
+    try {
+
+      setScannerMessage(
+        `Leyendo: ${code}`
+      );
+
+      const response =
+        await fetch(
+          `${API_URL}/api/products/qr/${encodeURIComponent(code)}`
+        );
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+
+        setScannerMessage(
+          data.message ||
+          "Producto no encontrado"
+        );
+
+        alert(
+          data.message ||
+          "Producto no encontrado"
+        );
+
+        restartProductScanner();
+
+        return;
+
+      }
+
+      addProductToCart(data);
+
+      setScannerMessage(
+        `✅ Agregado: ${data.Modelo}`
+      );
+
+      await stopProductScanner();
+
+      setTimeout(() => {
+
+        setShowProductScanner(false);
+
+        setScannerMessage("");
+
+      }, 500);
+
+    } catch (err) {
+
+      console.log(err);
+
+      setScannerMessage(
+        "Error al escanear producto"
+      );
+
+      alert(
+        "Error al escanear producto"
+      );
+
+      restartProductScanner();
+
+    }
 
   };
 
@@ -810,16 +1156,11 @@ function SalesAdmin() {
       Number(value || 0);
 
     if (points < 0) {
-
       points = 0;
-
     }
 
     if (points > maxRedeemablePoints) {
-
-      points =
-        maxRedeemablePoints;
-
+      points = maxRedeemablePoints;
     }
 
     setRedeemedPoints(
@@ -844,7 +1185,6 @@ function SalesAdmin() {
 
   /* =========================
      CALCULATE POINTS
-     Nuevos puntos para próxima compra
   ========================= */
 
   const calculatePoints = () => {
@@ -923,26 +1263,42 @@ function SalesAdmin() {
 
     }
 
+    if (discount !== redeemedPoints) {
+
+      alert(
+        "El descuento debe coincidir con los puntos canjeados."
+      );
+
+      return;
+
+    }
+
+    for (const item of cart) {
+
+      const stock =
+        getProductStock(item);
+
+      if (
+        Number(item.Quantity) > stock
+      ) {
+
+        alert(
+          `Stock insuficiente para ${item.Modelo}. Disponible: ${stock}`
+        );
+
+        return;
+
+      }
+
+    }
+
     const payload = {
-
-      CustomerId:
-        selectedCustomer,
-
-      Subtotal:
-        subtotal,
-
-      Discount:
-        discount,
-
-      RedeemedPoints:
-        redeemedPoints,
-
-      Total:
-        finalTotal,
-
-      Cart:
-        cart
-
+      CustomerId: selectedCustomer,
+      Subtotal: Number(subtotal),
+      Discount: Number(discount),
+      RedeemedPoints: Number(redeemedPoints),
+      Total: Number(finalTotal),
+      Cart: cart
     };
 
     try {
@@ -951,25 +1307,18 @@ function SalesAdmin() {
 
       const response =
         await fetch(
-
           `${API_URL}/api/sales`,
-
           {
-
             method: "POST",
 
             headers: {
-
               "Content-Type":
                 "application/json"
-
             },
 
             body:
               JSON.stringify(payload)
-
           }
-
         );
 
       const data =
@@ -989,41 +1338,35 @@ function SalesAdmin() {
 
       }
 
+      const pointsEarned =
+        Number(
+          data.PointsEarned ??
+          calculatePoints()
+        );
+
       generateTicket(
-
         customerData,
-
         cart,
-
         finalTotal,
-
-        data.PointsEarned ?? calculatePoints()
-
+        pointsEarned
       );
 
       sendWhatsApp(
-
         customerData,
-
         cart,
-
         finalTotal,
-
-        data.PointsEarned ?? calculatePoints()
-
+        pointsEarned
       );
 
       alert(
-
         `✅ Venta registrada
 🧾 Ticket #${data.SaleId}
 💰 Subtotal: $${Number(subtotal).toFixed(2)}
 🎁 Puntos canjeados: ${redeemedPoints}
 💸 Descuento: $${Number(discount).toFixed(2)}
 💵 Total pagado: $${Number(finalTotal).toFixed(2)}
-⭐ ${data.PointsEarned ?? calculatePoints()} puntos generados para próxima compra
+⭐ ${pointsEarned} puntos generados para próxima compra
 ⏳ Los nuevos puntos vencen en 1 año`
-
       );
 
       setCart([]);
@@ -1032,7 +1375,7 @@ function SalesAdmin() {
 
       setRedeemedPoints(0);
 
-      setSelectedProduct("");
+      setProductSearch("");
 
       await loadCustomers();
 
@@ -1081,25 +1424,19 @@ function SalesAdmin() {
             </h1>
 
             <p>
-              Escanea cliente y productos para registrar una venta.
+              Busca cliente, escanea productos y registra una venta.
             </p>
 
           </div>
 
           <button
-
             className="admin-add-btn"
-
             onClick={() =>
               setShowProductScanner(true)
             }
-
           >
-
             <ScanLine size={18} />
-
             Escanear Producto
-
           </button>
 
         </div>
@@ -1112,49 +1449,149 @@ function SalesAdmin() {
             Cliente
           </h2>
 
-          <select
+          <div className="sales-customer-search-box">
 
-            value={selectedCustomer}
+            <Search size={18} />
 
-            onChange={(e) =>
-              setSelectedCustomer(
-                e.target.value
-              )
-            }
+            <input
+              type="text"
+              placeholder="Buscar cliente por nombre, teléfono, correo o nivel..."
+              value={customerSearch}
+              onChange={(e) => {
 
-          >
+                setCustomerSearch(
+                  e.target.value
+                );
 
-            <option value="">
-              Seleccionar Cliente
-            </option>
+                if (selectedCustomer) {
 
-            {customers.map((customer) => (
+                  const selected =
+                    customers.find(
+                      (item) =>
+                        String(item.Id) ===
+                        String(selectedCustomer)
+                    );
 
-              <option
+                  if (
+                    selected &&
+                    e.target.value !== selected.FullName
+                  ) {
 
-                key={customer.Id}
+                    setSelectedCustomer("");
 
-                value={customer.Id}
+                  }
 
+                }
+
+              }}
+            />
+
+            {customerSearch && (
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomerSearch("");
+                  setSelectedCustomer("");
+                }}
               >
+                ✕
+              </button>
 
-                {customer.FullName}
-                {" - "}
-                {customer.Level || "Silver"}
+            )}
 
-              </option>
+          </div>
 
-            ))}
+          {!customerData && customerSearch && (
 
-          </select>
+            <div className="sales-customer-results">
+
+              {filteredCustomers.length > 0 ? (
+
+                filteredCustomers.slice(0, 8).map((customer) => (
+
+                  <button
+                    type="button"
+                    key={customer.Id}
+                    className="sales-customer-result-card"
+                    onClick={() =>
+                      selectCustomerFromSearch(customer)
+                    }
+                  >
+
+                    <div>
+
+                      <h4>
+                        {customer.FullName}
+                      </h4>
+
+                      <p>
+                        {customer.Phone || "Sin teléfono"}
+                        {" "}
+                        ·
+                        {" "}
+                        {customer.Email || "Sin correo"}
+                      </p>
+
+                    </div>
+
+                    <span>
+                      {customer.Level || "Silver"}
+                    </span>
+
+                  </button>
+
+                ))
+
+              ) : (
+
+                <div className="sales-customer-empty">
+                  No se encontraron clientes.
+                </div>
+
+              )}
+
+            </div>
+
+          )}
+
+          {!customerData && !customerSearch && (
+
+            <div className="sales-customer-empty">
+              Escribe para buscar y seleccionar un cliente.
+            </div>
+
+          )}
 
           {customerData && (
 
-            <div className="sale-customer-card points-expiration-card">
+            <div className="sale-customer-card points-expiration-card selected-sale-customer">
 
-              <h3>
-                {customerData.FullName}
-              </h3>
+              <div className="selected-sale-customer-header">
+
+                <div>
+
+                  <h3>
+                    {customerData.FullName}
+                  </h3>
+
+                  <p>
+                    {customerData.Phone || "Sin teléfono"}
+                  </p>
+
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCustomer("");
+                    setCustomerSearch("");
+                  }}
+                >
+                  Cambiar
+                </button>
+
+              </div>
 
               <p>
                 ⭐ Nivel:
@@ -1213,17 +1650,10 @@ function SalesAdmin() {
               </h2>
 
               <button
-
                 className="admin-close-btn"
-
-                onClick={() =>
-                  setShowProductScanner(false)
-                }
-
+                onClick={closeProductScanner}
               >
-
                 ✕
-
               </button>
 
             </div>
@@ -1232,6 +1662,43 @@ function SalesAdmin() {
               Escanea el QR del producto.
             </p>
 
+            {productCameras.length > 1 && (
+
+              <div className="camera-select-box">
+
+                <label>
+                  Cámara
+                </label>
+
+                <select
+                  value={selectedProductCameraId}
+                  onChange={(e) =>
+                    changeProductCamera(
+                      e.target.value
+                    )
+                  }
+                >
+
+                  {productCameras.map(
+                    (camera, index) => (
+
+                      <option
+                        key={camera.id}
+                        value={camera.id}
+                      >
+                        {camera.label ||
+                          `Cámara ${index + 1}`}
+                      </option>
+
+                    )
+                  )}
+
+                </select>
+
+              </div>
+
+            )}
+
             <div
               id="product-reader"
               className="qr-reader"
@@ -1239,11 +1706,9 @@ function SalesAdmin() {
 
             {scannerMessage && (
 
-              <p className="sale-points">
-
+              <div className="scanner-message">
                 {scannerMessage}
-
-              </p>
+              </div>
 
             )}
 
@@ -1260,64 +1725,130 @@ function SalesAdmin() {
           </h2>
 
           <p>
-            Puedes escanear el QR o agregarlo manualmente.
+            Puedes escanear el QR o buscar el producto manualmente.
           </p>
 
-          <div className="sales-add-row">
+          <div className="sales-product-search-box">
 
-            <select
+            <Search size={18} />
 
-              value={selectedProduct}
-
+            <input
+              type="text"
+              placeholder="Buscar producto por modelo, marca, color, categoría o QR..."
+              value={productSearch}
               onChange={(e) =>
-                setSelectedProduct(
+                setProductSearch(
                   e.target.value
                 )
               }
+            />
 
-            >
+            {productSearch && (
 
-              <option value="">
-                Seleccionar producto
-              </option>
+              <button
+                type="button"
+                onClick={() =>
+                  setProductSearch("")
+                }
+              >
+                ✕
+              </button>
 
-              {products.map((product) => (
-
-                <option
-
-                  key={product.Id}
-
-                  value={product.Id}
-
-                >
-
-                  {product.Modelo}
-                  {" - $"}
-                  {product.Price}
-                  {" - Stock: "}
-                  {product.Stock}
-
-                </option>
-
-              ))}
-
-            </select>
-
-            <button
-
-              className="admin-save-btn"
-
-              onClick={addManualProduct}
-
-            >
-
-              <Plus size={18} />
-
-              Agregar
-
-            </button>
+            )}
 
           </div>
+
+          {productSearch && (
+
+            <div className="sales-product-results">
+
+              {filteredProducts.length > 0 ? (
+
+                filteredProducts.slice(0, 10).map((product) => (
+
+                  <button
+                    type="button"
+                    key={product.Id}
+                    className="sales-product-result-card"
+                    onClick={() =>
+                      selectProductFromSearch(product)
+                    }
+                  >
+
+                    <div className="sales-product-result-left">
+
+                      {product.Image ? (
+
+                        <img
+                          src={`${API_URL}${product.Image}`}
+                          alt={product.Modelo}
+                        />
+
+                      ) : (
+
+                        <div className="sales-product-result-placeholder">
+                          Sin imagen
+                        </div>
+
+                      )}
+
+                      <div>
+
+                        <h4>
+                          {product.Modelo}
+                        </h4>
+
+                        <p>
+                          {product.Marca || "Sin marca"}
+                          {" "}
+                          ·
+                          {" "}
+                          {product.Color || "Sin color"}
+                          {" "}
+                          ·
+                          Stock:
+                          {" "}
+                          {product.Stock}
+                        </p>
+
+                        <small>
+                          QR:
+                          {" "}
+                          {product.ProductQR || "Sin QR"}
+                        </small>
+
+                      </div>
+
+                    </div>
+
+                    <span>
+                      $
+                      {Number(product.Price || 0).toFixed(2)}
+                    </span>
+
+                  </button>
+
+                ))
+
+              ) : (
+
+                <div className="sales-product-empty">
+                  No se encontraron productos.
+                </div>
+
+              )}
+
+            </div>
+
+          )}
+
+          {!productSearch && (
+
+            <div className="sales-product-empty">
+              Escribe para buscar y agregar un producto.
+            </div>
+
+          )}
 
         </div>
 
@@ -1340,11 +1871,8 @@ function SalesAdmin() {
           {cart.map((item, index) => (
 
             <div
-
               key={index}
-
               className="sale-item sale-item-with-image"
-
             >
 
               <div className="sale-product-left">
@@ -1352,21 +1880,15 @@ function SalesAdmin() {
                 {item.Image ? (
 
                   <img
-
                     className="sale-product-image"
-
                     src={`${API_URL}${item.Image}`}
-
                     alt={item.Modelo}
-
                   />
 
                 ) : (
 
                   <div className="sale-product-image-placeholder">
-
                     Sin imagen
-
                   </div>
 
                 )}
@@ -1390,12 +1912,6 @@ function SalesAdmin() {
                   </p>
 
                   <p>
-                    Cantidad:
-                    {" "}
-                    {item.Quantity}
-                  </p>
-
-                  <p>
                     Precio:
                     {" "}
                     $
@@ -1405,27 +1921,63 @@ function SalesAdmin() {
                   </p>
 
                   <p>
+                    Stock disponible:
+                    {" "}
+                    {item.Stock}
+                  </p>
+
+                  <p>
                     QR:
                     {" "}
                     {item.ProductQR}
                   </p>
+
+                  <div className="sale-quantity-controls">
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        decreaseProductQuantity(index)
+                      }
+                    >
+                      <Minus size={15} />
+                    </button>
+
+                    <input
+                      type="number"
+                      min="1"
+                      max={item.Stock}
+                      value={item.Quantity}
+                      onChange={(e) =>
+                        updateCartQuantity(
+                          index,
+                          e.target.value
+                        )
+                      }
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        increaseProductQuantity(index)
+                      }
+                    >
+                      <Plus size={15} />
+                    </button>
+
+                  </div>
 
                 </div>
 
               </div>
 
               <button
-
                 className="delete-btn"
-
                 onClick={() =>
                   removeProduct(index)
                 }
-
               >
-
                 <Trash2 size={16} />
-
               </button>
 
             </div>
@@ -1491,49 +2043,32 @@ function SalesAdmin() {
               )}
 
               <input
-
                 type="number"
-
                 min="0"
-
                 max={maxRedeemablePoints}
-
                 value={redeemedPoints}
-
                 onChange={(e) =>
                   handleRedeemPoints(
                     e.target.value
                   )
                 }
-
                 placeholder="Puntos a canjear"
-
               />
 
               <div className="points-redemption-actions">
 
                 <button
-
                   type="button"
-
                   onClick={redeemAllPoints}
-
                 >
-
                   Usar máximo
-
                 </button>
 
                 <button
-
                   type="button"
-
                   onClick={clearRedeemPoints}
-
                 >
-
                   Limpiar
-
                 </button>
 
               </div>
@@ -1600,19 +2135,13 @@ function SalesAdmin() {
           </div>
 
           <button
-
             className="admin-save-btn"
-
             onClick={registerSale}
-
             disabled={isSaving}
-
           >
-
             {isSaving
               ? "Registrando..."
               : "Registrar Venta"}
-
           </button>
 
         </div>
@@ -1638,11 +2167,8 @@ function SalesAdmin() {
             {historyList.map((sale) => (
 
               <div
-
                 key={sale.SaleId}
-
                 className="history-sale-item"
-
               >
 
                 <div className="history-sale-header">
@@ -1676,21 +2202,15 @@ function SalesAdmin() {
                     (product, index) => (
 
                       <div
-
                         key={index}
-
                         className="history-product-item"
-
                       >
 
                         {product.Image && (
 
                           <img
-
                             src={`${API_URL}${product.Image}`}
-
                             alt={product.Modelo}
-
                           />
 
                         )}

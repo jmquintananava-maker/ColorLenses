@@ -1298,6 +1298,504 @@ app.get("/api/dashboard/low-stock-products", async (req, res) => {
 });
 
 /* =========================
+   SETTINGS - BRANDS API
+========================= */
+
+app.get("/api/settings/brands", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetProductBrands()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get brands error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.get("/api/settings/brands-inactive", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetInactiveProductBrands()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get inactive brands error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.post("/api/settings/brands", async (req, res) => {
+  try {
+    const { Name } = req.body;
+
+    if (!Name) {
+      return res.status(400).json({
+        message: "Nombre de marca requerido"
+      });
+    }
+
+    await db.execute(
+      "CALL CreateProductBrand(?)",
+      [safeString(Name)]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Marca creada"
+    });
+  } catch (err) {
+    console.log("❌ Create brand error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/brands/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { Name, Status } = req.body;
+
+    await db.execute(
+      "CALL UpdateProductBrand(?,?,?)",
+      [
+        id,
+        safeString(Name),
+        safeString(Status || "Activo")
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Marca actualizada"
+    });
+  } catch (err) {
+    console.log("❌ Update brand error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.delete("/api/settings/brands/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL DeleteProductBrand(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "🗑️ Marca desactivada"
+    });
+  } catch (err) {
+    console.log("❌ Delete brand error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/brands/:id/reactivate", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL ReactivateProductBrand(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Marca reactivada"
+    });
+  } catch (err) {
+    console.log("❌ Reactivate brand error:", err);
+    res.status(500).json(err);
+  }
+});
+
+/* =========================
+   SETTINGS - CATEGORIES API
+========================= */
+
+app.get("/api/settings/categories", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetProductCategories()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get categories error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.get("/api/settings/categories-inactive", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetInactiveProductCategories()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get inactive categories error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.post("/api/settings/categories", async (req, res) => {
+  try {
+    const { Name } = req.body;
+
+    if (!Name) {
+      return res.status(400).json({
+        message: "Nombre de categoría requerido"
+      });
+    }
+
+    await db.execute(
+      "CALL CreateProductCategory(?)",
+      [safeString(Name)]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Categoría creada"
+    });
+  } catch (err) {
+    console.log("❌ Create category error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { Name, Status } = req.body;
+
+    await db.execute(
+      "CALL UpdateProductCategory(?,?,?)",
+      [
+        id,
+        safeString(Name),
+        safeString(Status || "Activo")
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Categoría actualizada"
+    });
+  } catch (err) {
+    console.log("❌ Update category error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.delete("/api/settings/categories/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL DeleteProductCategory(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "🗑️ Categoría desactivada"
+    });
+  } catch (err) {
+    console.log("❌ Delete category error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/categories/:id/reactivate", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL ReactivateProductCategory(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Categoría reactivada"
+    });
+  } catch (err) {
+    console.log("❌ Reactivate category error:", err);
+    res.status(500).json(err);
+  }
+});
+
+/* =========================
+   SETTINGS - COLORS API
+========================= */
+
+app.get("/api/settings/colors", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetProductColors()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get colors error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.get("/api/settings/colors-inactive", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetInactiveProductColors()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get inactive colors error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.post("/api/settings/colors", async (req, res) => {
+  try {
+    const { Name } = req.body;
+
+    if (!Name) {
+      return res.status(400).json({
+        message: "Nombre de color requerido"
+      });
+    }
+
+    await db.execute(
+      "CALL CreateProductColor(?)",
+      [safeString(Name)]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Color creado"
+    });
+  } catch (err) {
+    console.log("❌ Create color error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/colors/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { Name, Status } = req.body;
+
+    await db.execute(
+      "CALL UpdateProductColor(?,?,?)",
+      [
+        id,
+        safeString(Name),
+        safeString(Status || "Activo")
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Color actualizado"
+    });
+  } catch (err) {
+    console.log("❌ Update color error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.delete("/api/settings/colors/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL DeleteProductColor(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "🗑️ Color desactivado"
+    });
+  } catch (err) {
+    console.log("❌ Delete color error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/colors/:id/reactivate", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL ReactivateProductColor(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Color reactivado"
+    });
+  } catch (err) {
+    console.log("❌ Reactivate color error:", err);
+    res.status(500).json(err);
+  }
+});
+
+/* =========================
+   SETTINGS - HOME BANNERS API
+========================= */
+
+app.get("/api/settings/banners", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetHomeBanners()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get banners error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.get("/api/settings/banners-inactive", async (req, res) => {
+  try {
+    const [rows] =
+      await db.execute(
+        "CALL GetInactiveHomeBanners()"
+      );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get inactive banners error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.post("/api/settings/banners", async (req, res) => {
+  try {
+    const {
+      Title,
+      Subtitle,
+      ButtonText,
+      ButtonLink,
+      Image,
+      DisplayOrder
+    } = req.body;
+
+    await db.execute(
+      "CALL CreateHomeBanner(?,?,?,?,?,?)",
+      [
+        safeString(Title),
+        safeString(Subtitle),
+        safeString(ButtonText),
+        safeString(ButtonLink),
+        safeString(Image),
+        safeNumber(DisplayOrder)
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Banner creado"
+    });
+  } catch (err) {
+    console.log("❌ Create banner error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/banners/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      Title,
+      Subtitle,
+      ButtonText,
+      ButtonLink,
+      Image,
+      DisplayOrder,
+      Status
+    } = req.body;
+
+    await db.execute(
+      "CALL UpdateHomeBanner(?,?,?,?,?,?,?,?)",
+      [
+        id,
+        safeString(Title),
+        safeString(Subtitle),
+        safeString(ButtonText),
+        safeString(ButtonLink),
+        safeString(Image),
+        safeNumber(DisplayOrder),
+        safeString(Status || "Activo")
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Banner actualizado"
+    });
+  } catch (err) {
+    console.log("❌ Update banner error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.delete("/api/settings/banners/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL DeleteHomeBanner(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "🗑️ Banner desactivado"
+    });
+  } catch (err) {
+    console.log("❌ Delete banner error:", err);
+    res.status(500).json(err);
+  }
+});
+
+app.put("/api/settings/banners/:id/reactivate", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL ReactivateHomeBanner(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Banner reactivado"
+    });
+  } catch (err) {
+    console.log("❌ Reactivate banner error:", err);
+    res.status(500).json(err);
+  }
+});
+
+/* =========================
    AUTH HELPERS
 ========================= */
 
