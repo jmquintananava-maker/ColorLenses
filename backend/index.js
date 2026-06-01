@@ -137,38 +137,55 @@ app.post(
 
 /* =========================
    PRODUCTS API
+   PRODUCTO BASE
 ========================= */
 
 app.get("/api/products", async (req, res) => {
   try {
-    const [rows] =
-      await db.execute(
-        "CALL GetProducts()"
-      );
+    const [rows] = await db.execute(
+      "CALL GetProducts()"
+    );
 
     res.json(rows[0]);
   } catch (err) {
     console.log("❌ Get products error:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error consultando productos",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
 
-/* =========================
-   GET PRODUCT BY QR
-========================= */
-
-app.get("/api/products/qr/:code", async (req, res) => {
+app.get("/api/products-inactive", async (req, res) => {
   try {
-    const { code } = req.params;
+    const [rows] = await db.execute(
+      "CALL GetInactiveProducts()"
+    );
 
-    const [rows] =
-      await db.execute(
-        "CALL GetProductByQR(?)",
-        [code]
-      );
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get inactive products error:", err);
 
-    const product =
-      rows[0][0];
+    res.status(500).json({
+      message: "Error consultando productos inactivos",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.get("/api/products/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await db.execute(
+      "CALL GetProductById(?)",
+      [id]
+    );
+
+    const product = rows[0]?.[0];
 
     if (!product) {
       return res.status(404).json({
@@ -178,31 +195,15 @@ app.get("/api/products/qr/:code", async (req, res) => {
 
     res.json(product);
   } catch (err) {
-    console.log("❌ Get product by QR error:", err);
-    res.status(500).json(err);
-  }
-});
-
-app.get("/api/products/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const [rows] =
-      await db.execute(
-        "CALL GetProductById(?)",
-        [id]
-      );
-
-    res.json(rows[0][0]);
-  } catch (err) {
     console.log("❌ Get product by id error:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error consultando producto",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
-
-/* =========================
-   CREATE PRODUCT
-========================= */
 
 app.post("/api/products", async (req, res) => {
   try {
@@ -211,46 +212,37 @@ app.post("/api/products", async (req, res) => {
       Category,
       Marca,
       Modelo,
-      Color,
-      Price,
       Description,
-      Image,
-      Stock
+      Image
     } = req.body;
 
-    const ProductQR =
-      `PRODUCT-${Date.now()}`;
-
-    await db.execute(
-      "CALL CreateProduct(?,?,?,?,?,?,?,?,?,?)",
+    const [rows] = await db.execute(
+      "CALL CreateProduct(?,?,?,?,?,?)",
       [
         safeString(SKU),
         safeString(Category),
         safeString(Marca),
         safeString(Modelo),
-        safeString(Color),
-        safeNumber(Price),
         safeString(Description),
-        safeString(Image),
-        safeNumber(Stock),
-        ProductQR
+        safeString(Image)
       ]
     );
 
     res.json({
       success: true,
-      ProductQR,
-      message: "✅ Producto creado"
+      ProductId: rows[0]?.[0]?.ProductId,
+      message: "✅ Producto base creado"
     });
   } catch (err) {
     console.log("❌ Error create product:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error creando producto base",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
-
-/* =========================
-   UPDATE PRODUCT
-========================= */
 
 app.put("/api/products/:id", async (req, res) => {
   try {
@@ -261,47 +253,39 @@ app.put("/api/products/:id", async (req, res) => {
       Category,
       Marca,
       Modelo,
-      Color,
-      Price,
       Description,
       Image,
-      Stock,
-      ProductQR
+      Status
     } = req.body;
 
-    const safeProductQR =
-      ProductQR || `PRODUCT-${id}`;
-
     await db.execute(
-      "CALL UpdateProduct(?,?,?,?,?,?,?,?,?,?,?)",
+      "CALL UpdateProduct(?,?,?,?,?,?,?,?)",
       [
         id,
         safeString(SKU),
         safeString(Category),
         safeString(Marca),
         safeString(Modelo),
-        safeString(Color),
-        safeNumber(Price),
         safeString(Description),
         safeString(Image),
-        safeNumber(Stock),
-        safeProductQR
+        safeString(Status || "Activo")
       ]
     );
 
     res.json({
       success: true,
-      message: "✅ Producto actualizado"
+      message: "✅ Producto base actualizado"
     });
   } catch (err) {
     console.log("❌ Error update product:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error actualizando producto base",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
-
-/* =========================
-   DELETE PRODUCT
-========================= */
 
 app.delete("/api/products/:id", async (req, res) => {
   try {
@@ -314,35 +298,18 @@ app.delete("/api/products/:id", async (req, res) => {
 
     res.json({
       success: true,
-      message: "🗑️ Producto desactivado"
+      message: "🗑️ Producto base desactivado"
     });
   } catch (err) {
     console.log("❌ Delete product error:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error desactivando producto base",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
-
-/* =========================
-   INACTIVE PRODUCTS
-========================= */
-
-app.get("/api/products-inactive", async (req, res) => {
-  try {
-    const [rows] =
-      await db.execute(
-        "CALL GetInactiveProducts()"
-      );
-
-    res.json(rows[0]);
-  } catch (err) {
-    console.log("❌ Get inactive products error:", err);
-    res.status(500).json(err);
-  }
-});
-
-/* =========================
-   REACTIVATE PRODUCT
-========================= */
 
 app.put("/api/products/:id/reactivate", async (req, res) => {
   try {
@@ -355,11 +322,452 @@ app.put("/api/products/:id/reactivate", async (req, res) => {
 
     res.json({
       success: true,
-      message: "✅ Producto reactivado"
+      message: "✅ Producto base reactivado"
     });
   } catch (err) {
     console.log("❌ Reactivate product error:", err);
-    res.status(500).json(err);
+
+    res.status(500).json({
+      message: "Error reactivando producto base",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+/* =========================
+   PRODUCT VARIANTS API
+   PRODUCTO VENDIBLE / ESCANEABLE
+========================= */
+
+app.get("/api/product-variants", async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "CALL GetProductVariants()"
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get product variants error:", err);
+
+    res.status(500).json({
+      message: "Error consultando variantes",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.get("/api/product-variants-inactive", async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "CALL GetInactiveProductVariants()"
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get inactive product variants error:", err);
+
+    res.status(500).json({
+      message: "Error consultando variantes inactivas",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.get("/api/products/:id/variants", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await db.execute(
+      "CALL GetVariantsByProductId(?)",
+      [id]
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get variants by product id error:", err);
+
+    res.status(500).json({
+      message: "Error consultando variantes del producto",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.get("/api/product-variants/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await db.execute(
+      "CALL GetProductVariantById(?)",
+      [id]
+    );
+
+    const variant = rows[0]?.[0];
+
+    if (!variant) {
+      return res.status(404).json({
+        message: "Variante no encontrada"
+      });
+    }
+
+    res.json(variant);
+  } catch (err) {
+    console.log("❌ Get product variant by id error:", err);
+
+    res.status(500).json({
+      message: "Error consultando variante",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.post("/api/product-variants", async (req, res) => {
+  try {
+    const {
+      ProductId,
+      Color,
+      Power,
+      PowerLabel,
+      Price,
+      Stock,
+      FactoryCode,
+      InternalCode,
+      ScanCode,
+      CodeType
+    } = req.body;
+
+    if (!ProductId) {
+      return res.status(400).json({
+        message: "ProductId es obligatorio"
+      });
+    }
+
+    let finalFactoryCode = String(FactoryCode || "").trim();
+    let finalInternalCode = String(InternalCode || "").trim();
+    let finalScanCode = String(ScanCode || "").trim();
+    let finalCodeType = String(CodeType || "").trim();
+
+    if (!finalScanCode) {
+      finalInternalCode = finalInternalCode || `CL-${Date.now()}`;
+      finalScanCode = finalInternalCode;
+      finalCodeType = "INTERNAL";
+    }
+
+    if (!finalCodeType) {
+      finalCodeType = finalFactoryCode ? "BARCODE" : "INTERNAL";
+    }
+
+    const cleanPower = safeNumber(Power);
+
+    const cleanPowerLabel =
+      Number(cleanPower) === 0
+        ? "Sin graduación"
+        : safeString(PowerLabel || Number(cleanPower).toFixed(2));
+
+    const [rows] = await db.execute(
+      "CALL CreateProductVariant(?,?,?,?,?,?,?,?,?,?)",
+      [
+        safeNumber(ProductId),
+        safeString(Color),
+        cleanPower,
+        cleanPowerLabel,
+        safeNumber(Price),
+        safeNumber(Stock),
+        finalFactoryCode,
+        finalInternalCode,
+        finalScanCode,
+        finalCodeType
+      ]
+    );
+
+    res.json({
+      success: true,
+      ProductVariantId: rows[0]?.[0]?.ProductVariantId,
+      ScanCode: finalScanCode,
+      FactoryCode: finalFactoryCode || null,
+      InternalCode: finalInternalCode || null,
+      CodeType: finalCodeType,
+      message: "✅ Variante creada"
+    });
+  } catch (err) {
+    console.log("❌ Error create product variant:", err);
+
+    res.status(500).json({
+      message: "Error creando variante",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.put("/api/product-variants/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      Color,
+      Power,
+      PowerLabel,
+      Price,
+      Stock,
+      FactoryCode,
+      InternalCode,
+      ScanCode,
+      CodeType,
+      Status
+    } = req.body;
+
+    let finalFactoryCode = String(FactoryCode || "").trim();
+    let finalInternalCode = String(InternalCode || "").trim();
+    let finalScanCode = String(ScanCode || "").trim();
+    let finalCodeType = String(CodeType || "").trim();
+
+    if (!finalScanCode) {
+      finalInternalCode = finalInternalCode || `CL-${Date.now()}`;
+      finalScanCode = finalInternalCode;
+      finalCodeType = "INTERNAL";
+    }
+
+    if (!finalCodeType) {
+      finalCodeType = finalFactoryCode ? "BARCODE" : "INTERNAL";
+    }
+
+    const cleanPower = safeNumber(Power);
+
+    const cleanPowerLabel =
+      Number(cleanPower) === 0
+        ? "Sin graduación"
+        : safeString(PowerLabel || Number(cleanPower).toFixed(2));
+
+    await db.execute(
+      "CALL UpdateProductVariant(?,?,?,?,?,?,?,?,?,?,?)",
+      [
+        id,
+        safeString(Color),
+        cleanPower,
+        cleanPowerLabel,
+        safeNumber(Price),
+        safeNumber(Stock),
+        finalFactoryCode,
+        finalInternalCode,
+        finalScanCode,
+        finalCodeType,
+        safeString(Status || "Activo")
+      ]
+    );
+
+    res.json({
+      success: true,
+      ScanCode: finalScanCode,
+      FactoryCode: finalFactoryCode || null,
+      InternalCode: finalInternalCode || null,
+      CodeType: finalCodeType,
+      message: "✅ Variante actualizada"
+    });
+  } catch (err) {
+    console.log("❌ Error update product variant:", err);
+
+    res.status(500).json({
+      message: "Error actualizando variante",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.delete("/api/product-variants/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL DeleteProductVariant(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "🗑️ Variante desactivada"
+    });
+  } catch (err) {
+    console.log("❌ Delete product variant error:", err);
+
+    res.status(500).json({
+      message: "Error desactivando variante",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.put("/api/product-variants/:id/reactivate", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await db.execute(
+      "CALL ReactivateProductVariant(?)",
+      [id]
+    );
+
+    res.json({
+      success: true,
+      message: "✅ Variante reactivada"
+    });
+  } catch (err) {
+    console.log("❌ Reactivate product variant error:", err);
+
+    res.status(500).json({
+      message: "Error reactivando variante",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+/* =========================
+   SCAN PRODUCT BY CODE
+   Código de barras, QR o código interno
+========================= */
+
+app.get("/api/products/qr/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    const cleanCode = String(code || "").trim();
+
+    if (!cleanCode) {
+      return res.status(400).json({
+        message: "Código vacío"
+      });
+    }
+
+    const [rows] = await db.execute(
+      "CALL GetProductByScanCode(?)",
+      [cleanCode]
+    );
+
+    const product = rows[0]?.[0];
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Producto no encontrado"
+      });
+    }
+
+    if (product.ProductStatus !== "Activo") {
+      return res.status(400).json({
+        message: "El producto base está inactivo"
+      });
+    }
+
+    const variantStatus =
+      product.VariantStatus || product.Status;
+
+    if (variantStatus !== "Activo") {
+      return res.status(400).json({
+        message: "La variante está inactiva"
+      });
+    }
+
+    if (safeNumber(product.Stock) <= 0) {
+      return res.status(400).json({
+        message: "Producto sin stock disponible"
+      });
+    }
+
+    res.json(product);
+  } catch (err) {
+    console.log("❌ Get product by scan code error:", err);
+
+    res.status(500).json({
+      message: "Error buscando producto por código",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+app.get("/api/products/scan/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    const cleanCode = String(code || "").trim();
+
+    if (!cleanCode) {
+      return res.status(400).json({
+        message: "Código vacío"
+      });
+    }
+
+    const [rows] = await db.execute(
+      "CALL GetProductByScanCode(?)",
+      [cleanCode]
+    );
+
+    const product = rows[0]?.[0];
+
+    if (!product) {
+      return res.status(404).json({
+        message: "Producto no encontrado"
+      });
+    }
+
+    if (product.ProductStatus !== "Activo") {
+      return res.status(400).json({
+        message: "El producto base está inactivo"
+      });
+    }
+
+    const variantStatus =
+      product.VariantStatus || product.Status;
+
+    if (variantStatus !== "Activo") {
+      return res.status(400).json({
+        message: "La variante está inactiva"
+      });
+    }
+
+    if (safeNumber(product.Stock) <= 0) {
+      return res.status(400).json({
+        message: "Producto sin stock disponible"
+      });
+    }
+
+    res.json(product);
+  } catch (err) {
+    console.log("❌ Scan product error:", err);
+
+    res.status(500).json({
+      message: "Error escaneando producto",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+/* =========================
+   PRODUCT POWERS API
+========================= */
+
+app.get("/api/powers", async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      "CALL GetProductPowers()"
+    );
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.log("❌ Get product powers error:", err);
+
+    res.status(500).json({
+      message: "Error consultando graduaciones",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
   }
 });
 
@@ -753,6 +1161,7 @@ app.get("/api/sales/:id", async (req, res) => {
 
 /* =========================
    REGISTER SALE
+   WITH PRODUCT VARIANTS
    WITH POINTS EXPIRATION
 ========================= */
 
@@ -906,11 +1315,16 @@ app.post("/api/sales", async (req, res) => {
       });
     }
 
+    /* =========================
+       VALIDATE VARIANTS STOCK
+    ========================= */
+
     for (const item of cleanCart) {
-      const productId =
+      const productVariantId =
         safeNumber(
-          item.Id ||
-          item.ProductId
+          item.ProductVariantId ||
+          item.VariantId ||
+          item.Id
         );
 
       const quantity =
@@ -921,57 +1335,82 @@ app.post("/api/sales", async (req, res) => {
       const price =
         safeNumber(item.Price);
 
-      if (!productId || quantity <= 0 || price <= 0) {
+      if (
+        !productVariantId ||
+        quantity <= 0 ||
+        price <= 0
+      ) {
         await connection.rollback();
 
         return res.status(400).json({
-          message: "Producto inválido en el carrito",
+          message: "Variante inválida en el carrito",
           item
         });
       }
 
-      const [productRows] =
+      const [variantRows] =
         await connection.execute(
           `
           SELECT
-            Id,
-            Modelo,
-            Stock,
-            Status
-          FROM Products
-          WHERE Id = ?
+            v.Id AS ProductVariantId,
+            v.ProductId,
+            v.Color,
+            v.Power,
+            v.PowerLabel,
+            v.Price,
+            v.Stock,
+            v.Status AS VariantStatus,
+            p.Modelo,
+            p.Marca,
+            p.Status AS ProductStatus
+          FROM ProductVariants v
+          INNER JOIN Products p
+            ON p.Id = v.ProductId
+          WHERE v.Id = ?
           LIMIT 1
           `,
-          [productId]
+          [productVariantId]
         );
 
-      const product =
-        productRows[0];
+      const variant =
+        variantRows[0];
 
-      if (!product) {
+      if (!variant) {
         await connection.rollback();
 
         return res.status(404).json({
-          message: `Producto ${productId} no encontrado`
+          message: `Variante ${productVariantId} no encontrada`
         });
       }
 
-      if (product.Status === "Inactivo") {
+      if (variant.ProductStatus === "Inactivo") {
         await connection.rollback();
 
         return res.status(400).json({
-          message: `El producto ${product.Modelo || productId} está inactivo`
+          message: `El producto ${variant.Modelo || productVariantId} está inactivo`
         });
       }
 
-      if (safeNumber(product.Stock) < quantity) {
+      if (variant.VariantStatus === "Inactivo") {
         await connection.rollback();
 
         return res.status(400).json({
-          message: `Stock insuficiente para ${product.Modelo || productId}`
+          message: `La variante ${variant.Modelo || productVariantId} está inactiva`
+        });
+      }
+
+      if (safeNumber(variant.Stock) < quantity) {
+        await connection.rollback();
+
+        return res.status(400).json({
+          message: `Stock insuficiente para ${variant.Marca} ${variant.Modelo} ${variant.Color} ${variant.PowerLabel}. Disponible: ${variant.Stock}`
         });
       }
     }
+
+    /* =========================
+       CREATE SALE
+    ========================= */
 
     const [saleRows] =
       await connection.execute(
@@ -1003,10 +1442,21 @@ app.post("/api/sales", async (req, res) => {
       });
     }
 
+    /* =========================
+       CREATE SALE ITEMS
+       UPDATE VARIANT STOCK
+    ========================= */
+
     for (const item of cleanCart) {
+      const productVariantId =
+        safeNumber(
+          item.ProductVariantId ||
+          item.VariantId ||
+          item.Id
+        );
+
       const productId =
         safeNumber(
-          item.Id ||
           item.ProductId
         );
 
@@ -1021,11 +1471,22 @@ app.post("/api/sales", async (req, res) => {
       const itemSubtotal =
         price * quantity;
 
+      if (!productId) {
+        await connection.rollback();
+
+        return res.status(400).json({
+          message:
+            "ProductId faltante en variante del carrito",
+          item
+        });
+      }
+
       await connection.execute(
-        "CALL CreateSaleItem(?,?,?,?,?)",
+        "CALL CreateSaleItem(?,?,?,?,?,?)",
         [
           saleId,
           productId,
+          productVariantId,
           quantity,
           price,
           itemSubtotal
@@ -1033,13 +1494,17 @@ app.post("/api/sales", async (req, res) => {
       );
 
       await connection.execute(
-        "CALL UpdateProductStock(?,?)",
+        "CALL UpdateProductVariantStock(?,?)",
         [
-          productId,
+          productVariantId,
           quantity
         ]
       );
     }
+
+    /* =========================
+       POINTS
+    ========================= */
 
     const pointsEarned =
       calculatePointsByLevel(
@@ -1117,6 +1582,8 @@ app.post("/api/sales", async (req, res) => {
     connection.release();
   }
 });
+
+
 
 /* =========================
    DASHBOARD STATS API
