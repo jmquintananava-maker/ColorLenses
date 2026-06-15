@@ -255,11 +255,13 @@ app.put("/api/products/:id", async (req, res) => {
       Modelo,
       Description,
       Image,
+      Image2,
+      Image3,
       Status
     } = req.body;
 
     await db.execute(
-      "CALL UpdateProduct(?,?,?,?,?,?,?,?)",
+      "CALL UpdateProduct(?,?,?,?,?,?,?,?,?,?)",
       [
         id,
         safeString(SKU),
@@ -268,6 +270,8 @@ app.put("/api/products/:id", async (req, res) => {
         safeString(Modelo),
         safeString(Description),
         safeString(Image),
+        safeString(Image2),
+        safeString(Image3),
         safeString(Status || "Activo")
       ]
     );

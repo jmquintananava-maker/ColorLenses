@@ -5158,3 +5158,76 @@ button.products-count-box:hover {
     font-size: 24px;
   }
 }
+
+/* =========================
+   PRODUCT GALLERY ADMIN
+========================= */
+
+.product-gallery-card {
+  margin-bottom: 24px;
+}
+
+.product-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin: 18px 0 22px;
+}
+
+.product-gallery-item {
+  background: #fff7fc;
+  border: 1px solid #ffe1f2;
+  border-radius: 24px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.product-gallery-item label {
+  font-weight: 900;
+  color: #2c2435;
+}
+
+.product-gallery-item img,
+.product-gallery-placeholder {
+  width: 100%;
+  height: 220px;
+  border-radius: 20px;
+  object-fit: cover;
+  background: #ffffff;
+}
+
+.product-gallery-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9b94a3;
+  font-weight: 900;
+  border: 1px dashed #ffc3e3;
+}
+
+.product-gallery-item input[type="file"] {
+  width: 100%;
+}
+
+.gallery-remove-btn {
+  border: none;
+  border-radius: 16px;
+  min-height: 44px;
+  background: #fff0f8;
+  color: #ff4fa3;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .product-gallery-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .product-gallery-item img,
+  .product-gallery-placeholder {
+    height: 260px;
+  }
+}

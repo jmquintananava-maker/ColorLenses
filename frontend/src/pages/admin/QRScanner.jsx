@@ -22,6 +22,52 @@ function QRScanner() {
     };
   }, []);
 
+  const playScanSound = () => {
+    try {
+      const AudioContext =
+        window.AudioContext || window.webkitAudioContext;
+
+      const audioContext = new AudioContext();
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = "sine";
+
+      oscillator.frequency.setValueAtTime(
+        880,
+        audioContext.currentTime
+      );
+
+      gainNode.gain.setValueAtTime(
+        0.001,
+        audioContext.currentTime
+      );
+
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.25,
+        audioContext.currentTime + 0.01
+      );
+
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.001,
+        audioContext.currentTime + 0.18
+      );
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+
+      if (navigator.vibrate) {
+        navigator.vibrate(80);
+      }
+    } catch (err) {
+      console.log("No se pudo reproducir sonido:", err);
+    }
+  };
+
   const loadCamerasAndStart = async () => {
     try {
       const availableCameras = await Html5Qrcode.getCameras();
@@ -88,6 +134,8 @@ function QRScanner() {
 
       await stopScanner();
 
+      isProcessingRef.current = false;
+
       const scanner = new Html5Qrcode("reader");
 
       scannerRef.current = scanner;
@@ -123,6 +171,8 @@ function QRScanner() {
             isProcessingRef.current = false;
             return;
           }
+
+          playScanSound();
 
           setMessage("Validando cliente...");
 

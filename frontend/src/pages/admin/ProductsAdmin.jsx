@@ -15,7 +15,8 @@ import {
   Download,
   Search,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Images
 } from "lucide-react";
 
 import AdminSidebar from "../../components/AdminSidebar";
@@ -49,6 +50,22 @@ function ProductsAdmin() {
   const [imageFile, setImageFile] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const [showGalleryForm, setShowGalleryForm] = useState(false);
+  const [selectedGalleryProduct, setSelectedGalleryProduct] = useState(null);
+  const [isGallerySaving, setIsGallerySaving] = useState(false);
+
+  const [galleryForm, setGalleryForm] = useState({
+    Image: "",
+    Image2: "",
+    Image3: ""
+  });
+
+  const [galleryFiles, setGalleryFiles] = useState({
+    Image: null,
+    Image2: null,
+    Image3: null
+  });
+
   const [showCodeScanner, setShowCodeScanner] = useState(false);
   const [scannerMessage, setScannerMessage] = useState("");
   const [scannerCameras, setScannerCameras] = useState([]);
@@ -64,6 +81,8 @@ function ProductsAdmin() {
     Modelo: "",
     Description: "",
     Image: "",
+    Image2: "",
+    Image3: "",
 
     Color: "",
     Power: "0.00",
@@ -113,6 +132,61 @@ function ProductsAdmin() {
 
   const getProductId = (product) => {
     return Number(product.ProductId || 0);
+  };
+
+  const getImageUrl = (image) => {
+    if (!image) return "";
+
+    return String(image).startsWith("http")
+      ? image
+      : `${API_URL}${image}`;
+  };
+
+  const playScanSound = () => {
+    try {
+      const AudioContext =
+        window.AudioContext ||
+        window.webkitAudioContext;
+
+      const audioContext = new AudioContext();
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = "sine";
+
+      oscillator.frequency.setValueAtTime(
+        880,
+        audioContext.currentTime
+      );
+
+      gainNode.gain.setValueAtTime(
+        0.001,
+        audioContext.currentTime
+      );
+
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.25,
+        audioContext.currentTime + 0.01
+      );
+
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.001,
+        audioContext.currentTime + 0.18
+      );
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+
+      if (navigator.vibrate) {
+        navigator.vibrate(80);
+      }
+    } catch (err) {
+      console.log("No se pudo reproducir sonido:", err);
+    }
   };
 
   const loadSettingsOptions = async () => {
@@ -418,6 +492,8 @@ function ProductsAdmin() {
       Modelo: "",
       Description: "",
       Image: "",
+      Image2: "",
+      Image3: "",
 
       Color: "",
       Power: "0.00",
@@ -443,6 +519,7 @@ function ProductsAdmin() {
   const openCreateForm = () => {
     resetForm();
     setShowForm(true);
+    setShowGalleryForm(false);
   };
 
   const validateForm = () => {
@@ -487,28 +564,36 @@ function ProductsAdmin() {
     return true;
   };
 
+  const uploadSingleImage = async (file) => {
+    if (!file) {
+      return "";
+    }
+
+    const uploadData = new FormData();
+
+    uploadData.append("image", file);
+
+    const uploadResponse = await fetch(`${API_URL}/api/upload`, {
+      method: "POST",
+      body: uploadData
+    });
+
+    const uploadResult = await uploadResponse.json();
+
+    if (!uploadResponse.ok) {
+      throw new Error(
+        uploadResult.message || "No se pudo subir la imagen"
+      );
+    }
+
+    return uploadResult.imageUrl;
+  };
+
   const uploadImageIfNeeded = async () => {
     let imageUrl = formData.Image;
 
     if (imageFile) {
-      const uploadData = new FormData();
-
-      uploadData.append("image", imageFile);
-
-      const uploadResponse = await fetch(`${API_URL}/api/upload`, {
-        method: "POST",
-        body: uploadData
-      });
-
-      const uploadResult = await uploadResponse.json();
-
-      if (!uploadResponse.ok) {
-        throw new Error(
-          uploadResult.message || "No se pudo subir la imagen"
-        );
-      }
-
-      imageUrl = uploadResult.imageUrl;
+      imageUrl = await uploadSingleImage(imageFile);
     }
 
     return imageUrl;
@@ -583,7 +668,9 @@ function ProductsAdmin() {
         Marca: String(formData.Marca || "").trim(),
         Modelo: String(formData.Modelo || "").trim(),
         Description: formData.Description || "",
-        Image: imageUrl || ""
+        Image: imageUrl || "",
+        Image2: formData.Image2 || "",
+        Image3: formData.Image3 || ""
       };
 
       let productId = editingProductId;
@@ -752,6 +839,8 @@ function ProductsAdmin() {
       Modelo: product.Modelo || "",
       Description: product.Description || "",
       Image: product.Image || "",
+      Image2: product.Image2 || "",
+      Image3: product.Image3 || "",
 
       Color: product.Color || "",
       Power: cleanPower.toFixed(2),
@@ -775,7 +864,133 @@ function ProductsAdmin() {
     setImageFile(null);
     setScannerMessage("");
     setShowCodeScanner(false);
+    setShowGalleryForm(false);
     setShowForm(true);
+  };
+
+  const openGalleryForm = (product) => {
+    setSelectedGalleryProduct(product);
+
+    setGalleryForm({
+      Image: product.Image || "",
+      Image2: product.Image2 || "",
+      Image3: product.Image3 || ""
+    });
+
+    setGalleryFiles({
+      Image: null,
+      Image2: null,
+      Image3: null
+    });
+
+    setShowForm(false);
+    setShowGalleryForm(true);
+  };
+
+  const closeGalleryForm = () => {
+    setSelectedGalleryProduct(null);
+
+    setGalleryForm({
+      Image: "",
+      Image2: "",
+      Image3: ""
+    });
+
+    setGalleryFiles({
+      Image: null,
+      Image2: null,
+      Image3: null
+    });
+
+    setIsGallerySaving(false);
+    setShowGalleryForm(false);
+  };
+
+  const handleGalleryFile = (field, file) => {
+    setGalleryFiles((prev) => ({
+      ...prev,
+      [field]: file
+    }));
+  };
+
+  const removeGalleryImage = (field) => {
+    setGalleryForm((prev) => ({
+      ...prev,
+      [field]: ""
+    }));
+
+    setGalleryFiles((prev) => ({
+      ...prev,
+      [field]: null
+    }));
+  };
+
+  const saveGalleryImages = async () => {
+    if (!selectedGalleryProduct || isGallerySaving) return;
+
+    try {
+      setIsGallerySaving(true);
+
+      let nextImage = galleryForm.Image || "";
+      let nextImage2 = galleryForm.Image2 || "";
+      let nextImage3 = galleryForm.Image3 || "";
+
+      if (galleryFiles.Image) {
+        nextImage = await uploadSingleImage(galleryFiles.Image);
+      }
+
+      if (galleryFiles.Image2) {
+        nextImage2 = await uploadSingleImage(galleryFiles.Image2);
+      }
+
+      if (galleryFiles.Image3) {
+        nextImage3 = await uploadSingleImage(galleryFiles.Image3);
+      }
+
+      const response = await fetch(
+        `${API_URL}/api/products/${selectedGalleryProduct.ProductId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            SKU: selectedGalleryProduct.SKU || "",
+            Category: selectedGalleryProduct.Category || "",
+            Marca: selectedGalleryProduct.Marca || "",
+            Modelo: selectedGalleryProduct.Modelo || "",
+            Description: selectedGalleryProduct.Description || "",
+            Image: nextImage,
+            Image2: nextImage2,
+            Image3: nextImage3,
+            Status: selectedGalleryProduct.ProductStatus || "Activo"
+          })
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(
+          data.sqlMessage ||
+            data.message ||
+            "No se pudieron actualizar las fotos"
+        );
+
+        setIsGallerySaving(false);
+        return;
+      }
+
+      await loadProducts();
+
+      alert("✅ Fotos actualizadas correctamente");
+
+      closeGalleryForm();
+    } catch (err) {
+      console.log("❌ Error save gallery:", err);
+      alert(err.message || "Error al actualizar fotos");
+      setIsGallerySaving(false);
+    }
   };
 
   const stopCodeScanner = async () => {
@@ -820,7 +1035,7 @@ function ProductsAdmin() {
         fps: 10,
         qrbox: {
           width: window.innerWidth < 768 ? 260 : 280,
-          height: 180
+          height: window.innerWidth < 768 ? 180 : 180
         },
         aspectRatio: 1.333
       };
@@ -839,6 +1054,8 @@ function ProductsAdmin() {
             codeScannerProcessingRef.current = false;
             return;
           }
+
+          playScanSound();
 
           setFormData((prev) => ({
             ...prev,
@@ -1113,6 +1330,7 @@ function ProductsAdmin() {
               setViewMode("active");
               setSearch("");
               setShowForm(false);
+              closeGalleryForm();
               clearFilters();
               resetForm();
             }}
@@ -1130,6 +1348,7 @@ function ProductsAdmin() {
               setViewMode("inactive");
               setSearch("");
               setShowForm(false);
+              closeGalleryForm();
               clearFilters();
               resetForm();
             }}
@@ -1200,6 +1419,22 @@ function ProductsAdmin() {
               />
 
               <input
+                type="number"
+                name="Price"
+                placeholder="Precio"
+                value={formData.Price}
+                onChange={handleChange}
+              />
+
+              <input
+                type="number"
+                name="Stock"
+                placeholder="Stock"
+                value={formData.Stock}
+                onChange={handleChange}
+              />
+
+              <input
                 type="file"
                 onChange={handleImage}
               />
@@ -1207,7 +1442,7 @@ function ProductsAdmin() {
               {formData.Image && (
                 <div className="product-form-preview">
                   <img
-                    src={`${API_URL}${formData.Image}`}
+                    src={getImageUrl(formData.Image)}
                     alt={formData.Modelo}
                   />
                 </div>
@@ -1247,22 +1482,6 @@ function ProductsAdmin() {
                   </option>
                 ))}
               </select>
-
-              <input
-                type="number"
-                name="Price"
-                placeholder="Precio"
-                value={formData.Price}
-                onChange={handleChange}
-              />
-
-              <input
-                type="number"
-                name="Stock"
-                placeholder="Stock"
-                value={formData.Stock}
-                onChange={handleChange}
-              />
             </div>
 
             <h3 className="product-form-section-title">
@@ -1394,6 +1613,130 @@ function ProductsAdmin() {
                     : "Guardar"}
               </button>
             </div>
+          </div>
+        )}
+
+        {showGalleryForm && selectedGalleryProduct && (
+          <div className="admin-form-card product-gallery-card">
+            <div className="admin-form-header">
+              <div>
+                <h2>Fotos del producto</h2>
+
+                <p>
+                  {selectedGalleryProduct.Marca}{" "}
+                  {selectedGalleryProduct.Modelo}
+                </p>
+              </div>
+
+              <button
+                className="admin-close-btn"
+                onClick={closeGalleryForm}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="product-gallery-grid">
+              <div className="product-gallery-item">
+                <label>Imagen principal</label>
+
+                {galleryForm.Image ? (
+                  <img
+                    src={getImageUrl(galleryForm.Image)}
+                    alt="Imagen principal"
+                  />
+                ) : (
+                  <div className="product-gallery-placeholder">
+                    Sin imagen
+                  </div>
+                )}
+
+                <input
+                  type="file"
+                  onChange={(e) =>
+                    handleGalleryFile("Image", e.target.files[0])
+                  }
+                />
+
+                <button
+                  type="button"
+                  className="gallery-remove-btn"
+                  onClick={() => removeGalleryImage("Image")}
+                >
+                  Quitar
+                </button>
+              </div>
+
+              <div className="product-gallery-item">
+                <label>Imagen 2</label>
+
+                {galleryForm.Image2 ? (
+                  <img
+                    src={getImageUrl(galleryForm.Image2)}
+                    alt="Imagen 2"
+                  />
+                ) : (
+                  <div className="product-gallery-placeholder">
+                    Sin imagen
+                  </div>
+                )}
+
+                <input
+                  type="file"
+                  onChange={(e) =>
+                    handleGalleryFile("Image2", e.target.files[0])
+                  }
+                />
+
+                <button
+                  type="button"
+                  className="gallery-remove-btn"
+                  onClick={() => removeGalleryImage("Image2")}
+                >
+                  Quitar
+                </button>
+              </div>
+
+              <div className="product-gallery-item">
+                <label>Imagen 3</label>
+
+                {galleryForm.Image3 ? (
+                  <img
+                    src={getImageUrl(galleryForm.Image3)}
+                    alt="Imagen 3"
+                  />
+                ) : (
+                  <div className="product-gallery-placeholder">
+                    Sin imagen
+                  </div>
+                )}
+
+                <input
+                  type="file"
+                  onChange={(e) =>
+                    handleGalleryFile("Image3", e.target.files[0])
+                  }
+                />
+
+                <button
+                  type="button"
+                  className="gallery-remove-btn"
+                  onClick={() => removeGalleryImage("Image3")}
+                >
+                  Quitar
+                </button>
+              </div>
+            </div>
+
+            <button
+              className="admin-save-btn"
+              onClick={saveGalleryImages}
+              disabled={isGallerySaving}
+            >
+              {isGallerySaving
+                ? "Guardando fotos..."
+                : "Guardar fotos"}
+            </button>
           </div>
         )}
 
@@ -1560,7 +1903,7 @@ function ProductsAdmin() {
                     <td data-label="Imagen">
                       {product.Image && (
                         <img
-                          src={`${API_URL}${product.Image}`}
+                          src={getImageUrl(product.Image)}
                           alt={product.Modelo}
                           className="admin-product-img"
                         />
@@ -1634,14 +1977,24 @@ function ProductsAdmin() {
                         <button
                           className="edit-btn"
                           onClick={() => editProduct(product)}
+                          title="Editar variante"
                         >
                           <Pencil size={16} />
+                        </button>
+
+                        <button
+                          className="edit-btn"
+                          onClick={() => openGalleryForm(product)}
+                          title="Editar fotos"
+                        >
+                          <Images size={16} />
                         </button>
 
                         {viewMode === "active" ? (
                           <button
                             className="delete-btn"
                             onClick={() => deleteProduct(variantId)}
+                            title="Desactivar variante"
                           >
                             <Trash2 size={16} />
                           </button>
