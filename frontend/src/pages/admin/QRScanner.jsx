@@ -1,9 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import {
-  Html5Qrcode,
-  Html5QrcodeSupportedFormats
-} from "html5-qrcode";
+import { Html5Qrcode } from "html5-qrcode";
 
 import AdminSidebar from "../../components/AdminSidebar";
 
@@ -13,55 +10,30 @@ function QRScanner() {
   const [message, setMessage] = useState("");
   const [cameras, setCameras] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
-  const [isScannerActive, setIsScannerActive] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
 
   const scannerRef = useRef(null);
   const isProcessingRef = useRef(false);
-  const audioContextRef = useRef(null);
 
   useEffect(() => {
+    loadCamerasAndStart();
+
     return () => {
       stopScanner();
     };
   }, []);
-
-  const unlockScanSound = () => {
-    try {
-      const AudioContext =
-        window.AudioContext || window.webkitAudioContext;
-
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext();
-      }
-
-      if (audioContextRef.current.state === "suspended") {
-        audioContextRef.current.resume();
-      }
-    } catch (err) {
-      console.log("No se pudo activar audio:", err);
-    }
-  };
 
   const playScanSound = () => {
     try {
       const AudioContext =
         window.AudioContext || window.webkitAudioContext;
 
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioContext();
-      }
-
-      const audioContext = audioContextRef.current;
-
-      if (audioContext.state === "suspended") {
-        audioContext.resume();
-      }
+      const audioContext = new AudioContext();
 
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
 
       oscillator.type = "sine";
+
       oscillator.frequency.setValueAtTime(
         880,
         audioContext.currentTime
@@ -96,92 +68,75 @@ function QRScanner() {
     }
   };
 
-  const loadCameras = async () => {
-    const availableCameras = await Html5Qrcode.getCameras();
+  const loadCamerasAndStart = async () => {
+    try {
+      const availableCameras = await Html5Qrcode.getCameras();
 
-    if (!availableCameras || availableCameras.length === 0) {
-      setMessage("No se encontró cámara disponible");
-      return null;
-    }
+      if (!availableCameras || availableCameras.length === 0) {
+        setMessage("No se encontró cámara disponible");
+        return;
+      }
 
-    setCameras(availableCameras);
+      setCameras(availableCameras);
 
-    const backCamera =
-      availableCameras.find((camera) =>
-        String(camera.label || "")
-          .toLowerCase()
-          .includes("back")
-      ) ||
-      availableCameras.find((camera) =>
-        String(camera.label || "")
-          .toLowerCase()
-          .includes("rear")
-      ) ||
-      availableCameras.find((camera) =>
-        String(camera.label || "")
-          .toLowerCase()
-          .includes("environment")
-      );
+      const backCamera =
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("back")
+        ) ||
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("rear")
+        ) ||
+        availableCameras.find((camera) =>
+          String(camera.label || "")
+            .toLowerCase()
+            .includes("environment")
+        );
 
-    const defaultCamera =
-      backCamera || availableCameras[availableCameras.length - 1];
+      const defaultCamera =
+        backCamera || availableCameras[availableCameras.length - 1];
 
-    if (!selectedCameraId) {
       setSelectedCameraId(defaultCamera.id);
-    }
 
-    return selectedCameraId || defaultCamera.id;
+      await startScanner(defaultCamera.id);
+    } catch (err) {
+      console.log("❌ Error cargando cámaras:", err);
+
+      setMessage(
+        "No se pudo acceder a la cámara. Revisa permisos del navegador."
+      );
+    }
   };
 
   const stopScanner = async () => {
     try {
       if (scannerRef.current) {
-        const scanner = scannerRef.current;
+        await scannerRef.current.stop().catch(() => {});
+        scannerRef.current.clear();
 
         scannerRef.current = null;
-
-        await scanner.stop().catch(() => {});
-        scanner.clear();
       }
-
-      setIsScannerActive(false);
     } catch (err) {
       console.log("Scanner ya estaba detenido:", err);
-      setIsScannerActive(false);
     }
   };
 
   const startScanner = async (cameraId = null) => {
-    if (isStarting) return;
-
     try {
-      setIsStarting(true);
-      setMessage("Iniciando cámara...");
-
-      await stopScanner();
-
-      isProcessingRef.current = false;
-
       const reader = document.getElementById("reader");
 
       if (reader) {
         reader.innerHTML = "";
       }
 
-      const finalCameraId = cameraId || selectedCameraId || await loadCameras();
+      await stopScanner();
 
-      if (!finalCameraId) {
-        setIsStarting(false);
-        return;
-      }
+      isProcessingRef.current = false;
 
-      setSelectedCameraId(finalCameraId);
-
-      const scanner = new Html5Qrcode("reader", {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.QR_CODE
-        ]
-      });
+      const scanner = new Html5Qrcode("reader");
 
       scannerRef.current = scanner;
 
@@ -194,8 +149,16 @@ function QRScanner() {
         aspectRatio: 1.0
       };
 
+      const cameraConfig = cameraId
+        ? cameraId
+        : {
+            facingMode: {
+              exact: "environment"
+            }
+          };
+
       await scanner.start(
-        finalCameraId,
+        cameraConfig,
         config,
         async (decodedText) => {
           if (isProcessingRef.current) return;
@@ -219,39 +182,15 @@ function QRScanner() {
         },
         () => {}
       );
-
-      setIsScannerActive(true);
-      setMessage("");
-      setIsStarting(false);
     } catch (err) {
       console.log("❌ Error startScanner:", err);
 
-      setIsScannerActive(false);
-      setIsStarting(false);
-
-      setMessage(
-        "No se pudo acceder a la cámara. Cierra otras pestañas que usen cámara o revisa permisos del navegador."
-      );
-    }
-  };
-
-  const startScannerButton = async () => {
-    unlockScanSound();
-
-    try {
-      let cameraId = selectedCameraId;
-
-      if (!cameraId) {
-        cameraId = await loadCameras();
+      if (!cameraId && selectedCameraId) {
+        await startScanner(selectedCameraId);
+        return;
       }
 
-      await startScanner(cameraId);
-    } catch (err) {
-      console.log("❌ Error iniciar scanner:", err);
-
-      setMessage(
-        "No se pudo iniciar el escáner. Revisa permisos de cámara."
-      );
+      setMessage("No se pudo acceder a la cámara principal");
     }
   };
 
@@ -261,16 +200,16 @@ function QRScanner() {
     setMessage("Cambiando cámara...");
 
     await startScanner(cameraId);
+
+    setMessage("");
   };
 
-  const restartScanner = async () => {
+  const restartScanner = () => {
     isProcessingRef.current = false;
-
-    await stopScanner();
 
     setTimeout(() => {
       startScanner(selectedCameraId);
-    }, 500);
+    }, 800);
   };
 
   const validateCustomerQR = async (decodedText) => {
@@ -309,6 +248,8 @@ function QRScanner() {
           `⚠️ Cliente desactivado\n\n${data.customer.FullName}\n\nNo puede realizar compras hasta ser reactivado.`
         );
 
+        restartScanner();
+
         return;
       }
 
@@ -317,18 +258,24 @@ function QRScanner() {
 
         alert("❌ Cliente no encontrado en la base de datos");
 
+        restartScanner();
+
         return;
       }
 
       setMessage(data.message || "Error validando cliente");
 
       alert(data.message || "Error validando cliente");
+
+      restartScanner();
     } catch (err) {
       console.log("❌ Error validateCustomerQR:", err);
 
       setMessage("Error al validar cliente");
 
       alert("Error al validar cliente");
+
+      restartScanner();
     }
   };
 
@@ -344,32 +291,6 @@ function QRScanner() {
             <p>
               Escanea el QR del cliente para iniciar una venta
             </p>
-
-            <button
-              className="admin-save-btn"
-              type="button"
-              onClick={startScannerButton}
-              disabled={isStarting}
-            >
-              {isStarting
-                ? "Iniciando cámara..."
-                : isScannerActive
-                  ? "Reiniciar escáner"
-                  : "Iniciar escáner"}
-            </button>
-
-            {isScannerActive && (
-              <button
-                className="admin-close-btn"
-                type="button"
-                onClick={stopScanner}
-                style={{
-                  marginTop: "12px"
-                }}
-              >
-                Detener cámara
-              </button>
-            )}
 
             {cameras.length > 1 && (
               <div className="camera-select-box">
@@ -403,16 +324,6 @@ function QRScanner() {
               <div className="scanner-message">
                 {message}
               </div>
-            )}
-
-            {message && !isScannerActive && (
-              <button
-                className="admin-save-btn"
-                type="button"
-                onClick={restartScanner}
-              >
-                Volver a escanear
-              </button>
             )}
           </div>
         </div>

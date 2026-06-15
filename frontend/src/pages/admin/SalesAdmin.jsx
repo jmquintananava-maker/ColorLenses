@@ -28,6 +28,10 @@ function SalesAdmin() {
   const { slug } =
     useParams();
 
+  /* =========================
+     STATES
+  ========================= */
+
   const [customers, setCustomers] =
     useState([]);
 
@@ -64,9 +68,6 @@ function SalesAdmin() {
   const [selectedProductCameraId, setSelectedProductCameraId] =
     useState("");
 
-  const [isProductScannerStarting, setIsProductScannerStarting] =
-    useState(false);
-
   const [customerHistory, setCustomerHistory] =
     useState([]);
 
@@ -82,33 +83,9 @@ function SalesAdmin() {
   const productScanProcessingRef =
     useRef(false);
 
-  const audioContextRef =
-    useRef(null);
-
-  const unlockScanSound = () => {
-    try {
-      const AudioContext =
-        window.AudioContext ||
-        window.webkitAudioContext;
-
-      if (!audioContextRef.current) {
-        audioContextRef.current =
-          new AudioContext();
-      }
-
-      if (
-        audioContextRef.current.state ===
-        "suspended"
-      ) {
-        audioContextRef.current.resume();
-      }
-    } catch (err) {
-      console.log(
-        "No se pudo activar audio:",
-        err
-      );
-    }
-  };
+  /* =========================
+     SCAN SOUND
+  ========================= */
 
   const playScanSound = () => {
     try {
@@ -116,17 +93,8 @@ function SalesAdmin() {
         window.AudioContext ||
         window.webkitAudioContext;
 
-      if (!audioContextRef.current) {
-        audioContextRef.current =
-          new AudioContext();
-      }
-
       const audioContext =
-        audioContextRef.current;
-
-      if (audioContext.state === "suspended") {
-        audioContext.resume();
-      }
+        new AudioContext();
 
       const oscillator =
         audioContext.createOscillator();
@@ -173,10 +141,18 @@ function SalesAdmin() {
     }
   };
 
+  /* =========================
+     LOAD DATA
+  ========================= */
+
   useEffect(() => {
     loadCustomers();
     loadProducts();
   }, [slug]);
+
+  /* =========================
+     LOAD CUSTOMER DATA
+  ========================= */
 
   useEffect(() => {
     if (selectedCustomer !== "") {
@@ -190,11 +166,19 @@ function SalesAdmin() {
     setRedeemedPoints(0);
   }, [selectedCustomer]);
 
+  /* =========================
+     PRODUCT SCANNER
+  ========================= */
+
   useEffect(() => {
+    if (!showProductScanner) return;
+
+    loadProductCamerasAndStart();
+
     return () => {
       stopProductScanner();
     };
-  }, []);
+  }, [showProductScanner]);
 
   const loadProductCamerasAndStart = async () => {
     try {
@@ -261,33 +245,26 @@ function SalesAdmin() {
   const stopProductScanner = async () => {
     try {
       if (productScannerRef.current) {
-        const scanner =
-          productScannerRef.current;
+        await productScannerRef.current
+          .stop()
+          .catch(() => {});
+
+        productScannerRef.current.clear();
 
         productScannerRef.current = null;
-
-        await scanner.stop().catch(() => {});
-        scanner.clear();
       }
     } catch (err) {
       console.log(
         "Scanner producto ya estaba detenido:",
         err
       );
-    } finally {
-      productScanProcessingRef.current = false;
-      setIsProductScannerStarting(false);
     }
   };
 
   const startProductScanner = async (
     cameraId = null
   ) => {
-    if (isProductScannerStarting) return;
-
     try {
-      setIsProductScannerStarting(true);
-
       const reader =
         document.getElementById(
           "product-reader"
@@ -300,19 +277,6 @@ function SalesAdmin() {
       await stopProductScanner();
 
       productScanProcessingRef.current = false;
-
-      const finalCameraId =
-        cameraId || selectedProductCameraId;
-
-      if (!finalCameraId) {
-        setScannerMessage(
-          "No se encontró cámara seleccionada"
-        );
-
-        setIsProductScannerStarting(false);
-
-        return;
-      }
 
       const scanner =
         new Html5Qrcode(
@@ -351,8 +315,17 @@ function SalesAdmin() {
         aspectRatio: 1.333
       };
 
+      const cameraConfig =
+        cameraId
+          ? cameraId
+          : {
+              facingMode: {
+                exact: "environment"
+              }
+            };
+
       await scanner.start(
-        finalCameraId,
+        cameraConfig,
         config,
 
         async (decodedText) => {
@@ -386,20 +359,25 @@ function SalesAdmin() {
 
         () => {}
       );
-
-      setIsProductScannerStarting(false);
-      setScannerMessage("");
     } catch (err) {
       console.log(
         "❌ Error startProductScanner:",
         err
       );
 
-      setIsProductScannerStarting(false);
-      productScanProcessingRef.current = false;
+      if (
+        !cameraId &&
+        selectedProductCameraId
+      ) {
+        await startProductScanner(
+          selectedProductCameraId
+        );
+
+        return;
+      }
 
       setScannerMessage(
-        "No se pudo acceder a la cámara. Cierra otras pestañas que usen cámara o revisa permisos del navegador."
+        "No se pudo acceder a la cámara principal"
       );
     }
   };
@@ -421,6 +399,8 @@ function SalesAdmin() {
     await startProductScanner(
       cameraId
     );
+
+    setScannerMessage("");
   };
 
   const closeProductScanner = async () => {
@@ -434,18 +414,20 @@ function SalesAdmin() {
     setShowProductScanner(false);
   };
 
-  const restartProductScanner = async () => {
+  const restartProductScanner = () => {
     productScanProcessingRef.current =
       false;
-
-    await stopProductScanner();
 
     setTimeout(() => {
       startProductScanner(
         selectedProductCameraId
       );
-    }, 500);
+    }, 800);
   };
+
+  /* =========================
+     LOAD CUSTOMERS
+  ========================= */
 
   const loadCustomers = async () => {
     try {
@@ -494,6 +476,10 @@ function SalesAdmin() {
     }
   };
 
+  /* =========================
+     LOAD PRODUCT VARIANTS
+  ========================= */
+
   const loadProducts = async () => {
     try {
       const response =
@@ -517,6 +503,10 @@ function SalesAdmin() {
       );
     }
   };
+
+  /* =========================
+     NORMALIZE VARIANT
+  ========================= */
 
   const normalizeVariant = (item) => {
     const productVariantId =
@@ -582,6 +572,10 @@ function SalesAdmin() {
     };
   };
 
+  /* =========================
+     LOAD CUSTOMER POINTS
+  ========================= */
+
   const loadCustomerPoints = async (
     customerId
   ) => {
@@ -621,6 +615,10 @@ function SalesAdmin() {
     }
   };
 
+  /* =========================
+     LOAD CUSTOMER HISTORY
+  ========================= */
+
   const loadCustomerHistory = async (
     customerId
   ) => {
@@ -652,6 +650,10 @@ function SalesAdmin() {
       setCustomerHistory([]);
     }
   };
+
+  /* =========================
+     GROUP HISTORY BY SALE
+  ========================= */
 
   const groupedHistory =
     customerHistory.reduce(
@@ -714,6 +716,10 @@ function SalesAdmin() {
         Number(a.SaleId)
     );
 
+  /* =========================
+     CUSTOMER DATA
+  ========================= */
+
   const customerData =
     customers.find(
       (item) =>
@@ -750,6 +756,10 @@ function SalesAdmin() {
       subtotal - discount,
       0
     );
+
+  /* =========================
+     FILTERS
+  ========================= */
 
   const filteredCustomers =
     customers.filter((customer) => {
@@ -842,6 +852,10 @@ function SalesAdmin() {
     setProductSearch("");
   };
 
+  /* =========================
+     DATE FORMAT
+  ========================= */
+
   const formatDate = (dateValue) => {
     if (!dateValue) {
       return "Sin fecha";
@@ -887,6 +901,10 @@ function SalesAdmin() {
       }
     );
   };
+
+  /* =========================
+     CART HELPERS
+  ========================= */
 
   const calculateSubtotal = (
     items
@@ -1079,6 +1097,10 @@ function SalesAdmin() {
     calculateSubtotal(updatedCart);
   };
 
+  /* =========================
+     HANDLE PRODUCT SCAN
+  ========================= */
+
   const handleProductScanCode = async (
     code
   ) => {
@@ -1106,7 +1128,7 @@ function SalesAdmin() {
           "Producto no encontrado"
         );
 
-        await restartProductScanner();
+        restartProductScanner();
 
         return;
       }
@@ -1140,9 +1162,13 @@ function SalesAdmin() {
         "Error al escanear producto"
       );
 
-      await restartProductScanner();
+      restartProductScanner();
     }
   };
+
+  /* =========================
+     HANDLE REDEEM POINTS
+  ========================= */
 
   const handleRedeemPoints = (value) => {
     let points =
@@ -1170,6 +1196,10 @@ function SalesAdmin() {
   const clearRedeemPoints = () => {
     setRedeemedPoints(0);
   };
+
+  /* =========================
+     CALCULATE POINTS
+  ========================= */
 
   const calculatePoints = () => {
     if (!customerData) return 0;
@@ -1199,6 +1229,10 @@ function SalesAdmin() {
       finalTotal / 50
     );
   };
+
+  /* =========================
+     REGISTER SALE
+  ========================= */
 
   const registerSale = async () => {
     if (isSaving) return;
@@ -1421,6 +1455,8 @@ function SalesAdmin() {
       <AdminSidebar />
 
       <main className="admin-content">
+        {/* HEADER */}
+
         <div className="admin-header-row">
           <div className="admin-header">
             <h1>
@@ -1434,21 +1470,16 @@ function SalesAdmin() {
 
           <button
             className="admin-add-btn"
-            onClick={async () => {
-              unlockScanSound();
-              playScanSound();
-
-              setShowProductScanner(true);
-
-              setTimeout(() => {
-                loadProductCamerasAndStart();
-              }, 300);
-            }}
+            onClick={() =>
+              setShowProductScanner(true)
+            }
           >
             <ScanLine size={18} />
             Escanear Producto
           </button>
         </div>
+
+        {/* CUSTOMER */}
 
         <div className="admin-form-card">
           <h2>
@@ -1568,28 +1599,43 @@ function SalesAdmin() {
               </div>
 
               <p>
-                ⭐ Nivel: {customerData.Level || "Silver"}
+                ⭐ Nivel:
+                {" "}
+                {customerData.Level || "Silver"}
               </p>
 
               <p>
-                🎁 Puntos vigentes: <strong>{availablePoints}</strong>
-              </p>
-
-              <p>
-                ⏳ Próximo vencimiento:{" "}
+                🎁 Puntos vigentes:
+                {" "}
                 <strong>
-                  {formatExpirationDate(nextExpirationDate)}
+                  {availablePoints}
+                </strong>
+              </p>
+
+              <p>
+                ⏳ Próximo vencimiento:
+                {" "}
+                <strong>
+                  {formatExpirationDate(
+                    nextExpirationDate
+                  )}
                 </strong>
               </p>
 
               {pointsExpiringSoon > 0 && (
                 <div className="points-warning-box">
-                  ⚠️ {pointsExpiringSoon} puntos vencen en los próximos 30 días.
+                  ⚠️
+                  {" "}
+                  {pointsExpiringSoon}
+                  {" "}
+                  puntos vencen en los próximos 30 días.
                 </div>
               )}
             </div>
           )}
         </div>
+
+        {/* PRODUCT SCANNER */}
 
         {showProductScanner && (
           <div className="admin-form-card">
@@ -1649,23 +1695,10 @@ function SalesAdmin() {
                 {scannerMessage}
               </div>
             )}
-
-            <button
-              type="button"
-              className="admin-save-btn"
-              onClick={() =>
-                startProductScanner(
-                  selectedProductCameraId
-                )
-              }
-              disabled={isProductScannerStarting}
-            >
-              {isProductScannerStarting
-                ? "Iniciando cámara..."
-                : "Reiniciar cámara"}
-            </button>
           </div>
         )}
+
+        {/* PRODUCT MANUAL */}
 
         <div className="admin-form-card">
           <h2>
@@ -1728,24 +1761,39 @@ function SalesAdmin() {
 
                       <div>
                         <h4>
-                          {product.Marca} {product.Modelo}
+                          {product.Marca}
+                          {" "}
+                          {product.Modelo}
                         </h4>
 
                         <p>
-                          {product.Color || "Sin color"} ·{" "}
-                          {product.PowerLabel || "Sin graduación"} · Stock:{" "}
+                          {product.Color || "Sin color"}
+                          {" "}
+                          ·
+                          {" "}
+                          {product.PowerLabel || "Sin graduación"}
+                          {" "}
+                          ·
+                          Stock:
+                          {" "}
                           {product.Stock}
                         </p>
 
                         <small>
-                          Código: {product.ScanCode || "Sin código"} ·{" "}
+                          Código:
+                          {" "}
+                          {product.ScanCode || "Sin código"}
+                          {" "}
+                          ·
+                          {" "}
                           {product.CodeType || "INTERNAL"}
                         </small>
                       </div>
                     </div>
 
                     <span>
-                      ${Number(product.Price || 0).toFixed(2)}
+                      $
+                      {Number(product.Price || 0).toFixed(2)}
                     </span>
                   </button>
                 ))
@@ -1763,6 +1811,8 @@ function SalesAdmin() {
             </div>
           )}
         </div>
+
+        {/* CART */}
 
         <div className="admin-form-card">
           <h2>
@@ -1795,27 +1845,40 @@ function SalesAdmin() {
 
                 <div className="sale-product-info">
                   <strong>
-                    {item.Marca} {item.Modelo}
+                    {item.Marca}
+                    {" "}
+                    {item.Modelo}
                   </strong>
 
                   <p>
-                    Color: {item.Color || "Sin color"}
+                    Color:
+                    {" "}
+                    {item.Color || "Sin color"}
                   </p>
 
                   <p>
-                    Graduación: {item.PowerLabel || "Sin graduación"}
+                    Graduación:
+                    {" "}
+                    {item.PowerLabel || "Sin graduación"}
                   </p>
 
                   <p>
-                    Precio: ${Number(item.Price).toFixed(2)}
+                    Precio:
+                    {" "}
+                    $
+                    {Number(item.Price).toFixed(2)}
                   </p>
 
                   <p>
-                    Stock disponible: {item.Stock}
+                    Stock disponible:
+                    {" "}
+                    {item.Stock}
                   </p>
 
                   <p>
-                    Código: {item.ScanCode || "Sin código"}
+                    Código:
+                    {" "}
+                    {item.ScanCode || "Sin código"}
                   </p>
 
                   <div className="sale-quantity-controls">
@@ -1864,6 +1927,8 @@ function SalesAdmin() {
             </div>
           ))}
 
+          {/* POINTS REDEMPTION */}
+
           {customerData && cart.length > 0 && (
             <div className="points-redemption-card">
               <h3>
@@ -1875,23 +1940,40 @@ function SalesAdmin() {
               </p>
 
               <p>
-                Puntos vigentes disponibles: <strong>{availablePoints}</strong>
+                Puntos vigentes disponibles:
+                {" "}
+                <strong>
+                  {availablePoints}
+                </strong>
               </p>
 
               <p>
-                Máximo canjeable: <strong>{maxRedeemablePoints}</strong>
+                Máximo canjeable:
+                {" "}
+                <strong>
+                  {maxRedeemablePoints}
+                </strong>
               </p>
 
               {nextExpirationDate && (
                 <p>
-                  Próximo vencimiento:{" "}
-                  <strong>{formatExpirationDate(nextExpirationDate)}</strong>
+                  Próximo vencimiento:
+                  {" "}
+                  <strong>
+                    {formatExpirationDate(
+                      nextExpirationDate
+                    )}
+                  </strong>
                 </p>
               )}
 
               {pointsExpiringSoon > 0 && (
                 <div className="points-warning-box">
-                  ⚠️ Se recomienda usar primero los {pointsExpiringSoon} puntos próximos a vencer.
+                  ⚠️ Se recomienda usar primero los
+                  {" "}
+                  {pointsExpiringSoon}
+                  {" "}
+                  puntos próximos a vencer.
                 </div>
               )}
 
@@ -1932,7 +2014,8 @@ function SalesAdmin() {
             </h2>
 
             <h1>
-              ${Number(subtotal).toFixed(2)}
+              $
+              {Number(subtotal).toFixed(2)}
             </h1>
           </div>
 
@@ -1943,7 +2026,8 @@ function SalesAdmin() {
               </h2>
 
               <h1>
-                -${Number(discount).toFixed(2)}
+                -$
+                {Number(discount).toFixed(2)}
               </h1>
             </div>
           )}
@@ -1954,12 +2038,15 @@ function SalesAdmin() {
             </h2>
 
             <h1>
-              ${Number(finalTotal).toFixed(2)}
+              $
+              {Number(finalTotal).toFixed(2)}
             </h1>
           </div>
 
           <div className="sale-points">
-            ⭐ Puntos para próxima compra: {calculatePoints()}
+            ⭐ Puntos para próxima compra:
+            {" "}
+            {calculatePoints()}
 
             <br />
 
@@ -1978,6 +2065,8 @@ function SalesAdmin() {
               : "Registrar Venta"}
           </button>
         </div>
+
+        {/* CUSTOMER HISTORY */}
 
         {customerData && (
           <div className="admin-form-card customer-history-card">
@@ -2010,7 +2099,10 @@ function SalesAdmin() {
                   </div>
 
                   <strong>
-                    ${Number(sale.Total || 0).toFixed(2)}
+                    $
+                    {Number(
+                      sale.Total || 0
+                    ).toFixed(2)}
                   </strong>
                 </div>
 
@@ -2034,13 +2126,28 @@ function SalesAdmin() {
                           </h4>
 
                           <p>
-                            {product.Marca} - {product.Color} -{" "}
+                            {product.Marca}
+                            {" "}
+                            -
+                            {" "}
+                            {product.Color}
+                            {" "}
+                            -
+                            {" "}
                             {product.PowerLabel || "Sin graduación"}
                           </p>
 
                           <p>
-                            Cantidad: {product.Quantity} | $
-                            {Number(product.Price || 0).toFixed(2)}
+                            Cantidad:
+                            {" "}
+                            {product.Quantity}
+                            {" "}
+                            |
+                            {" "}
+                            $
+                            {Number(
+                              product.Price || 0
+                            ).toFixed(2)}
                           </p>
                         </div>
                       </div>
