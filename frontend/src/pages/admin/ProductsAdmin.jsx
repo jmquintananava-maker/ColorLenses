@@ -70,9 +70,11 @@ function ProductsAdmin() {
   const [scannerMessage, setScannerMessage] = useState("");
   const [scannerCameras, setScannerCameras] = useState([]);
   const [selectedScannerCameraId, setSelectedScannerCameraId] = useState("");
+  const [isCodeScannerStarting, setIsCodeScannerStarting] = useState(false);
 
   const codeScannerRef = useRef(null);
   const codeScannerProcessingRef = useRef(false);
+  const audioContextRef = useRef(null);
 
   const [formData, setFormData] = useState({
     SKU: "",
@@ -142,13 +144,39 @@ function ProductsAdmin() {
       : `${API_URL}${image}`;
   };
 
+  const unlockScanSound = () => {
+    try {
+      const AudioContext =
+        window.AudioContext ||
+        window.webkitAudioContext;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+
+      if (audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume();
+      }
+    } catch (err) {
+      console.log("No se pudo activar audio:", err);
+    }
+  };
+
   const playScanSound = () => {
     try {
       const AudioContext =
         window.AudioContext ||
         window.webkitAudioContext;
 
-      const audioContext = new AudioContext();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+
+      const audioContext = audioContextRef.current;
+
+      if (audioContext.state === "suspended") {
+        audioContext.resume();
+      }
 
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
@@ -996,17 +1024,27 @@ function ProductsAdmin() {
   const stopCodeScanner = async () => {
     try {
       if (codeScannerRef.current) {
-        await codeScannerRef.current.stop().catch(() => {});
-        codeScannerRef.current.clear();
+        const scanner = codeScannerRef.current;
+
         codeScannerRef.current = null;
+
+        await scanner.stop().catch(() => {});
+        scanner.clear();
       }
     } catch (err) {
       console.log("Scanner ya estaba detenido:", err);
+    } finally {
+      codeScannerProcessingRef.current = false;
+      setIsCodeScannerStarting(false);
     }
   };
 
   const startCodeScanner = async (cameraId = null) => {
+    if (isCodeScannerStarting) return;
+
     try {
+      setIsCodeScannerStarting(true);
+
       const reader = document.getElementById("product-code-reader");
 
       if (reader) {
@@ -1016,6 +1054,14 @@ function ProductsAdmin() {
       await stopCodeScanner();
 
       codeScannerProcessingRef.current = false;
+
+      const finalCameraId = cameraId || selectedScannerCameraId;
+
+      if (!finalCameraId) {
+        setScannerMessage("No se encontró cámara seleccionada");
+        setIsCodeScannerStarting(false);
+        return;
+      }
 
       const scanner = new Html5Qrcode("product-code-reader", {
         formatsToSupport: [
@@ -1041,7 +1087,7 @@ function ProductsAdmin() {
       };
 
       await scanner.start(
-        cameraId,
+        finalCameraId,
         config,
         async (decodedText) => {
           if (codeScannerProcessingRef.current) return;
@@ -1076,14 +1122,25 @@ function ProductsAdmin() {
         },
         () => {}
       );
+
+      setIsCodeScannerStarting(false);
+      setScannerMessage("");
     } catch (err) {
       console.log("❌ Error startCodeScanner:", err);
-      setScannerMessage("No se pudo acceder a la cámara");
+
+      setIsCodeScannerStarting(false);
+      codeScannerProcessingRef.current = false;
+
+      setScannerMessage(
+        "No se pudo acceder a la cámara. Cierra otras pestañas que usen cámara o revisa permisos del navegador."
+      );
     }
   };
 
   const openCodeScanner = async () => {
     try {
+      unlockScanSound();
+
       setShowCodeScanner(true);
       setScannerMessage("Cargando cámara...");
 
@@ -1121,9 +1178,10 @@ function ProductsAdmin() {
 
   const changeCodeScannerCamera = async (cameraId) => {
     setSelectedScannerCameraId(cameraId);
+    codeScannerProcessingRef.current = false;
     setScannerMessage("Cambiando cámara...");
+
     await startCodeScanner(cameraId);
-    setScannerMessage("");
   };
 
   const closeCodeScanner = async () => {
@@ -1598,6 +1656,19 @@ function ProductsAdmin() {
                       {scannerMessage}
                     </div>
                   )}
+
+                  <button
+                    type="button"
+                    className="admin-save-btn"
+                    onClick={() =>
+                      startCodeScanner(selectedScannerCameraId)
+                    }
+                    disabled={isCodeScannerStarting}
+                  >
+                    {isCodeScannerStarting
+                      ? "Iniciando cámara..."
+                      : "Reiniciar cámara"}
+                  </button>
                 </div>
               )}
 
