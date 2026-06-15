@@ -13,12 +13,16 @@ import {
   Plus,
   RotateCcw,
   Download,
-  Search
+  Search,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 
 import AdminSidebar from "../../components/AdminSidebar";
 
 const API_URL = import.meta.env.VITE_API_URL;
+
+const PAGE_SIZE = 10;
 
 function ProductsAdmin() {
   const [products, setProducts] = useState([]);
@@ -31,11 +35,19 @@ function ProductsAdmin() {
   const [viewMode, setViewMode] = useState("active");
   const [search, setSearch] = useState("");
 
+  const [brandFilter, setBrandFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [powerFilter, setPowerFilter] = useState("");
+
+  const [currentPage, setCurrentPage] = useState(1);
+
   const [showForm, setShowForm] = useState(false);
   const [editingVariantId, setEditingVariantId] = useState(null);
   const [editingProductId, setEditingProductId] = useState(null);
 
   const [imageFile, setImageFile] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const [showCodeScanner, setShowCodeScanner] = useState(false);
   const [scannerMessage, setScannerMessage] = useState("");
@@ -80,6 +92,29 @@ function ProductsAdmin() {
     };
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    search,
+    brandFilter,
+    categoryFilter,
+    productFilter,
+    powerFilter,
+    viewMode
+  ]);
+
+  const normalizeText = (value) => {
+    return String(value || "").trim().toLowerCase();
+  };
+
+  const getVariantId = (product) => {
+    return Number(product.ProductVariantId || product.Id || 0);
+  };
+
+  const getProductId = (product) => {
+    return Number(product.ProductId || 0);
+  };
+
   const loadSettingsOptions = async () => {
     try {
       const [
@@ -118,26 +153,57 @@ function ProductsAdmin() {
       const response = await fetch(endpoint);
       const data = await response.json();
 
-      setProducts(Array.isArray(data) ? data : []);
+      const sortedData = Array.isArray(data)
+        ? [...data].sort((a, b) => getVariantId(b) - getVariantId(a))
+        : [];
+
+      setProducts(sortedData);
     } catch (err) {
       console.log("❌ Error cargando variantes:", err);
     }
   };
 
+  const uniqueProductModels = useMemo(() => {
+    const models = products
+      .map((product) => product.Modelo)
+      .filter(Boolean);
+
+    return [...new Set(models)].sort((a, b) =>
+      String(a).localeCompare(String(b))
+    );
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
-    const searchText = search.toLowerCase().trim();
+    const searchText = normalizeText(search);
+    const cleanBrandFilter = normalizeText(brandFilter);
+    const cleanCategoryFilter = normalizeText(categoryFilter);
+    const cleanProductFilter = normalizeText(productFilter);
+    const cleanPowerFilter = normalizeText(powerFilter);
 
-    if (!searchText) return products;
+    const filtered = products.filter((product) => {
+      const productBrand = normalizeText(product.Marca);
+      const productCategory = normalizeText(product.Category);
+      const productModel = normalizeText(product.Modelo);
+      const productPower = normalizeText(product.PowerLabel);
 
-    return products.filter((product) => {
-      return (
+      const matchesBrand =
+        !cleanBrandFilter || productBrand === cleanBrandFilter;
+
+      const matchesCategory =
+        !cleanCategoryFilter || productCategory === cleanCategoryFilter;
+
+      const matchesProduct =
+        !cleanProductFilter || productModel === cleanProductFilter;
+
+      const matchesPower =
+        !cleanPowerFilter || productPower === cleanPowerFilter;
+
+      const matchesSearch =
+        !searchText ||
         String(product.ProductVariantId || product.Id || "")
           .toLowerCase()
           .includes(searchText) ||
         String(product.ProductId || "")
-          .toLowerCase()
-          .includes(searchText) ||
-        String(product.SKU || "")
           .toLowerCase()
           .includes(searchText) ||
         String(product.Category || "")
@@ -178,10 +244,59 @@ function ProductsAdmin() {
           .includes(searchText) ||
         String(product.Status || "")
           .toLowerCase()
-          .includes(searchText)
+          .includes(searchText);
+
+      return (
+        matchesBrand &&
+        matchesCategory &&
+        matchesProduct &&
+        matchesPower &&
+        matchesSearch
       );
     });
-  }, [products, search]);
+
+    return filtered.sort((a, b) => getVariantId(b) - getVariantId(a));
+  }, [
+    products,
+    search,
+    brandFilter,
+    categoryFilter,
+    productFilter,
+    powerFilter
+  ]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredProducts.length / PAGE_SIZE)
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+    const endIndex = startIndex + PAGE_SIZE;
+
+    return filteredProducts.slice(startIndex, endIndex);
+  }, [filteredProducts, safeCurrentPage]);
+
+  const showingStart =
+    filteredProducts.length === 0
+      ? 0
+      : (safeCurrentPage - 1) * PAGE_SIZE + 1;
+
+  const showingEnd = Math.min(
+    safeCurrentPage * PAGE_SIZE,
+    filteredProducts.length
+  );
+
+  const clearFilters = () => {
+    setSearch("");
+    setBrandFilter("");
+    setCategoryFilter("");
+    setProductFilter("");
+    setPowerFilter("");
+    setCurrentPage(1);
+  };
 
   const getPowerLabel = (powerValue) => {
     const cleanPower = Number(powerValue || 0);
@@ -201,9 +316,9 @@ function ProductsAdmin() {
     return cleanPower.toFixed(2);
   };
 
-  const getSuggestedPrice = (powerValue) => {
+  const getSuggestedPrice = (powerValue, brandValue = formData.Marca) => {
     const cleanPower = Number(powerValue || 0);
-    const cleanBrand = String(formData.Marca || "").toLowerCase();
+    const cleanBrand = normalizeText(brandValue);
 
     if (cleanBrand.includes("urban") && cleanPower === 0) {
       return 350;
@@ -228,8 +343,8 @@ function ProductsAdmin() {
         PowerLabel: nextPowerLabel,
         Price:
           prev.Marca &&
-          String(prev.Marca).toLowerCase().includes("urban")
-            ? getSuggestedPrice(value)
+          normalizeText(prev.Marca).includes("urban")
+            ? getSuggestedPrice(value, prev.Marca)
             : prev.Price
       }));
 
@@ -243,7 +358,7 @@ function ProductsAdmin() {
         ...prev,
         Marca: value,
         Price:
-          String(value || "").toLowerCase().includes("urban")
+          normalizeText(value).includes("urban")
             ? cleanPower === 0
               ? 350
               : 700
@@ -322,6 +437,7 @@ function ProductsAdmin() {
     setImageFile(null);
     setShowCodeScanner(false);
     setScannerMessage("");
+    setIsSaving(false);
   };
 
   const openCreateForm = () => {
@@ -341,7 +457,7 @@ function ProductsAdmin() {
     }
 
     if (!formData.Modelo.trim()) {
-      alert("Escribe el modelo");
+      alert("Escribe el producto/modelo");
       return false;
     }
 
@@ -398,22 +514,87 @@ function ProductsAdmin() {
     return imageUrl;
   };
 
+  const findExistingBaseProduct = () => {
+    const cleanCategory = normalizeText(formData.Category);
+    const cleanMarca = normalizeText(formData.Marca);
+    const cleanModelo = normalizeText(formData.Modelo);
+
+    return products.find((product) => {
+      return (
+        normalizeText(product.Category) === cleanCategory &&
+        normalizeText(product.Marca) === cleanMarca &&
+        normalizeText(product.Modelo) === cleanModelo
+      );
+    });
+  };
+
+  const productVariantAlreadyExists = () => {
+    const cleanCategory = normalizeText(formData.Category);
+    const cleanMarca = normalizeText(formData.Marca);
+    const cleanModelo = normalizeText(formData.Modelo);
+    const cleanColor = normalizeText(formData.Color);
+    const cleanPower = Number(formData.Power || 0);
+
+    return products.some((product) => {
+      const variantId = product.ProductVariantId || product.Id;
+
+      if (
+        editingVariantId &&
+        String(variantId) === String(editingVariantId)
+      ) {
+        return false;
+      }
+
+      return (
+        normalizeText(product.Category) === cleanCategory &&
+        normalizeText(product.Marca) === cleanMarca &&
+        normalizeText(product.Modelo) === cleanModelo &&
+        normalizeText(product.Color) === cleanColor &&
+        Number(product.Power || 0) === cleanPower
+      );
+    });
+  };
+
   const saveProduct = async () => {
+    if (isSaving) return;
+
     try {
-      if (!validateForm()) return;
+      setIsSaving(true);
+
+      if (!validateForm()) {
+        setIsSaving(false);
+        return;
+      }
+
+      if (productVariantAlreadyExists()) {
+        alert(
+          "Ya existe una variante con la misma marca, categoría, producto, color y graduación."
+        );
+
+        setIsSaving(false);
+        return;
+      }
 
       const imageUrl = await uploadImageIfNeeded();
 
       const productPayload = {
         SKU: formData.SKU || "",
-        Category: formData.Category || "",
-        Marca: formData.Marca || "",
-        Modelo: formData.Modelo || "",
+        Category: String(formData.Category || "").trim(),
+        Marca: String(formData.Marca || "").trim(),
+        Modelo: String(formData.Modelo || "").trim(),
         Description: formData.Description || "",
         Image: imageUrl || ""
       };
 
       let productId = editingProductId;
+
+      if (!editingVariantId) {
+        const existingBaseProduct = findExistingBaseProduct();
+
+        if (existingBaseProduct && getProductId(existingBaseProduct)) {
+          productId = getProductId(existingBaseProduct);
+        }
+      }
 
       if (editingVariantId && editingProductId) {
         const productResponse = await fetch(
@@ -439,9 +620,12 @@ function ProductsAdmin() {
               "No se pudo actualizar el producto base"
           );
 
+          setIsSaving(false);
           return;
         }
-      } else {
+      }
+
+      if (!editingVariantId && !productId) {
         const productResponse = await fetch(`${API_URL}/api/products`, {
           method: "POST",
           headers: {
@@ -459,6 +643,7 @@ function ProductsAdmin() {
               "No se pudo crear el producto base"
           );
 
+          setIsSaving(false);
           return;
         }
 
@@ -467,10 +652,12 @@ function ProductsAdmin() {
 
       if (!productId) {
         alert("No se pudo obtener el ProductId");
+        setIsSaving(false);
         return;
       }
 
       const cleanPower = Number(formData.Power || 0);
+
       const cleanPowerLabel =
         cleanPower === 0
           ? "Sin graduación"
@@ -486,13 +673,11 @@ function ProductsAdmin() {
         ? String(formData.InternalCode || "").trim()
         : "";
 
-      const scanCode = isInternal
-        ? internalCode
-        : factoryCode;
+      const scanCode = isInternal ? internalCode : factoryCode;
 
       const variantPayload = {
         ProductId: productId,
-        Color: formData.Color || "",
+        Color: String(formData.Color || "").trim(),
         Power: cleanPower,
         PowerLabel: cleanPowerLabel,
         Price: Number(formData.Price || 0),
@@ -527,6 +712,7 @@ function ProductsAdmin() {
             "No se pudo guardar la variante"
         );
 
+        setIsSaving(false);
         return;
       }
 
@@ -534,21 +720,24 @@ function ProductsAdmin() {
 
       resetForm();
       setShowForm(false);
+      setCurrentPage(1);
 
       alert(
         editingVariantId
           ? "✅ Variante actualizada"
-          : "✅ Producto y variante creados"
+          : "✅ Variante creada correctamente"
       );
+
+      setIsSaving(false);
     } catch (err) {
       console.log("❌ Error save product:", err);
       alert(err.message || "Error al guardar producto");
+      setIsSaving(false);
     }
   };
 
   const editProduct = (product) => {
-    const variantId =
-      product.ProductVariantId || product.Id;
+    const variantId = product.ProductVariantId || product.Id;
 
     setEditingVariantId(variantId);
     setEditingProductId(product.ProductId);
@@ -592,12 +781,8 @@ function ProductsAdmin() {
   const stopCodeScanner = async () => {
     try {
       if (codeScannerRef.current) {
-        await codeScannerRef.current
-          .stop()
-          .catch(() => {});
-
+        await codeScannerRef.current.stop().catch(() => {});
         codeScannerRef.current.clear();
-
         codeScannerRef.current = null;
       }
     } catch (err) {
@@ -617,34 +802,25 @@ function ProductsAdmin() {
 
       codeScannerProcessingRef.current = false;
 
-      const scanner = new Html5Qrcode(
-        "product-code-reader",
-        {
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.DATA_MATRIX
-          ]
-        }
-      );
+      const scanner = new Html5Qrcode("product-code-reader", {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.DATA_MATRIX
+        ]
+      });
 
       codeScannerRef.current = scanner;
 
       const config = {
         fps: 10,
         qrbox: {
-          width:
-            window.innerWidth < 768
-              ? 260
-              : 280,
-          height:
-            window.innerWidth < 768
-              ? 180
-              : 180
+          width: window.innerWidth < 768 ? 260 : 280,
+          height: 180
         },
         aspectRatio: 1.333
       };
@@ -729,17 +905,13 @@ function ProductsAdmin() {
   const changeCodeScannerCamera = async (cameraId) => {
     setSelectedScannerCameraId(cameraId);
     setScannerMessage("Cambiando cámara...");
-
     await startCodeScanner(cameraId);
-
     setScannerMessage("");
   };
 
   const closeCodeScanner = async () => {
     await stopCodeScanner();
-
     codeScannerProcessingRef.current = false;
-
     setScannerMessage("");
     setShowCodeScanner(false);
   };
@@ -756,12 +928,9 @@ function ProductsAdmin() {
         return;
       }
 
-      const variantId =
-        product.ProductVariantId || product.Id;
+      const variantId = product.ProductVariantId || product.Id;
 
-      const svgElement = document.getElementById(
-        `product-qr-${variantId}`
-      );
+      const svgElement = document.getElementById(`product-qr-${variantId}`);
 
       if (!svgElement) {
         alert("No se encontró el QR para descargar.");
@@ -817,11 +986,7 @@ function ProductsAdmin() {
 
         ctx.font = "bold 22px Arial";
 
-        ctx.fillText(
-          String(scanCode),
-          canvasSize / 2,
-          600
-        );
+        ctx.fillText(String(scanCode), canvasSize / 2, 600);
 
         const pngUrl = canvas.toDataURL("image/png");
 
@@ -856,12 +1021,9 @@ function ProductsAdmin() {
     if (!confirmDelete) return;
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/product-variants/${id}`,
-        {
-          method: "DELETE"
-        }
-      );
+      const response = await fetch(`${API_URL}/api/product-variants/${id}`, {
+        method: "DELETE"
+      });
 
       const data = await response.json();
 
@@ -951,6 +1113,7 @@ function ProductsAdmin() {
               setViewMode("active");
               setSearch("");
               setShowForm(false);
+              clearFilters();
               resetForm();
             }}
           >
@@ -967,6 +1130,7 @@ function ProductsAdmin() {
               setViewMode("inactive");
               setSearch("");
               setShowForm(false);
+              clearFilters();
               resetForm();
             }}
           >
@@ -1030,12 +1194,10 @@ function ProductsAdmin() {
               <input
                 type="text"
                 name="Modelo"
-                placeholder="Modelo"
+                placeholder="Producto / modelo"
                 value={formData.Modelo}
                 onChange={handleChange}
               />
-
-             
 
               <input
                 type="file"
@@ -1220,8 +1382,16 @@ function ProductsAdmin() {
                 </div>
               )}
 
-              <button className="admin-save-btn" onClick={saveProduct}>
-                {editingVariantId ? "Actualizar" : "Guardar"}
+              <button
+                className="admin-save-btn"
+                onClick={saveProduct}
+                disabled={isSaving}
+              >
+                {isSaving
+                  ? "Guardando..."
+                  : editingVariantId
+                    ? "Actualizar"
+                    : "Guardar"}
               </button>
             </div>
           </div>
@@ -1254,15 +1424,117 @@ function ProductsAdmin() {
           </div>
         </div>
 
+        <div className="products-toolbar">
+          <div className="products-search-box">
+            <select
+              value={brandFilter}
+              onChange={(e) => setBrandFilter(e.target.value)}
+            >
+              <option value="">Todas las marcas</option>
+
+              {brands.map((brand) => (
+                <option key={brand.Id} value={brand.Name}>
+                  {brand.Name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="products-search-box">
+            <select
+              value={productFilter}
+              onChange={(e) => setProductFilter(e.target.value)}
+            >
+              <option value="">Todos los productos</option>
+
+              {uniqueProductModels.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="products-search-box">
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+            >
+              <option value="">Todas las categorías</option>
+
+              {categories.map((category) => (
+                <option key={category.Id} value={category.Name}>
+                  {category.Name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="products-search-box">
+            <select
+              value={powerFilter}
+              onChange={(e) => setPowerFilter(e.target.value)}
+            >
+              <option value="">Todas las graduaciones</option>
+
+              {powers.map((power) => (
+                <option key={power.Id} value={power.PowerLabel}>
+                  {power.PowerLabel}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            className="products-count-box"
+            onClick={clearFilters}
+          >
+            Limpiar filtros
+          </button>
+        </div>
+
+        <div className="products-pagination-box">
+          <span>
+            Mostrando {showingStart} - {showingEnd} de {filteredProducts.length}
+          </span>
+
+          <div className="products-pagination-actions">
+            <button
+              type="button"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            >
+              <ChevronLeft size={16} />
+              Anterior
+            </button>
+
+            <strong>
+              Página {safeCurrentPage} de {totalPages}
+            </strong>
+
+            <button
+              type="button"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() =>
+                setCurrentPage((page) => Math.min(totalPages, page + 1))
+              }
+            >
+              Siguiente
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+
         <div className="admin-table-wrapper">
           <table className="admin-table">
             <thead>
               <tr>
                 <th>Imagen</th>
-                <th>Producto</th>
                 <th>Marca</th>
-                <th>Categoría</th>
+                <th>Producto</th>
                 <th>Color</th>
+                <th>Categoría</th>
                 <th>Graduación</th>
                 <th>Precio</th>
                 <th>Stock</th>
@@ -1274,9 +1546,8 @@ function ProductsAdmin() {
             </thead>
 
             <tbody>
-              {filteredProducts.map((product) => {
-                const variantId =
-                  product.ProductVariantId || product.Id;
+              {paginatedProducts.map((product) => {
+                const variantId = product.ProductVariantId || product.Id;
 
                 const scanCode =
                   product.ScanCode ||
@@ -1296,20 +1567,20 @@ function ProductsAdmin() {
                       )}
                     </td>
 
-                    <td data-label="Producto">
-                      {product.Modelo}
-                    </td>
-
                     <td data-label="Marca">
                       {product.Marca}
                     </td>
 
-                    <td data-label="Categoría">
-                      {product.Category}
+                    <td data-label="Producto">
+                      {product.Modelo}
                     </td>
 
                     <td data-label="Color">
                       {product.Color}
+                    </td>
+
+                    <td data-label="Categoría">
+                      {product.Category}
                     </td>
 
                     <td data-label="Graduación">
@@ -1392,8 +1663,12 @@ function ProductsAdmin() {
               {filteredProducts.length === 0 && (
                 <tr>
                   <td colSpan="12" data-label="Productos">
-                    {search
-                      ? "No se encontraron variantes con esa búsqueda."
+                    {search ||
+                    brandFilter ||
+                    categoryFilter ||
+                    productFilter ||
+                    powerFilter
+                      ? "No se encontraron variantes con esos filtros."
                       : viewMode === "active"
                         ? "No hay variantes activas."
                         : "No hay variantes inactivas."}
@@ -1402,6 +1677,38 @@ function ProductsAdmin() {
               )}
             </tbody>
           </table>
+        </div>
+
+        <div className="products-pagination-box">
+          <span>
+            Mostrando {showingStart} - {showingEnd} de {filteredProducts.length}
+          </span>
+
+          <div className="products-pagination-actions">
+            <button
+              type="button"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            >
+              <ChevronLeft size={16} />
+              Anterior
+            </button>
+
+            <strong>
+              Página {safeCurrentPage} de {totalPages}
+            </strong>
+
+            <button
+              type="button"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() =>
+                setCurrentPage((page) => Math.min(totalPages, page + 1))
+              }
+            >
+              Siguiente
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
       </main>
     </div>
