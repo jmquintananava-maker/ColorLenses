@@ -13,6 +13,7 @@ function QRScanner() {
 
   const scannerRef = useRef(null);
   const isProcessingRef = useRef(false);
+  const audioContextRef = useRef(null);
 
   useEffect(() => {
     loadCamerasAndStart();
@@ -22,12 +23,86 @@ function QRScanner() {
     };
   }, []);
 
+  const getPreferredBackCamera = (availableCameras) => {
+    if (!availableCameras || availableCameras.length === 0) {
+      return null;
+    }
+
+    const normalizedCameras = availableCameras.map((camera) => ({
+      ...camera,
+      cleanLabel: String(camera.label || "").toLowerCase()
+    }));
+
+    const ultraWideCamera =
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("ultra")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("gran angular")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("wide")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("dual")
+      );
+
+    if (ultraWideCamera) {
+      return ultraWideCamera;
+    }
+
+    const backCamera =
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("back")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("rear")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("environment")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("trasera")
+      );
+
+    if (backCamera) {
+      return backCamera;
+    }
+
+    return availableCameras[availableCameras.length - 1];
+  };
+
+  const unlockScanSound = () => {
+    try {
+      const AudioContext =
+        window.AudioContext || window.webkitAudioContext;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+
+      if (audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume();
+      }
+    } catch (err) {
+      console.log("No se pudo activar audio:", err);
+    }
+  };
+
   const playScanSound = () => {
     try {
       const AudioContext =
         window.AudioContext || window.webkitAudioContext;
 
-      const audioContext = new AudioContext();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext();
+      }
+
+      const audioContext = audioContextRef.current;
+
+      if (audioContext.state === "suspended") {
+        audioContext.resume();
+      }
 
       const oscillator = audioContext.createOscillator();
       const gainNode = audioContext.createGain();
@@ -70,6 +145,8 @@ function QRScanner() {
 
   const loadCamerasAndStart = async () => {
     try {
+      unlockScanSound();
+
       const availableCameras = await Html5Qrcode.getCameras();
 
       if (!availableCameras || availableCameras.length === 0) {
@@ -79,29 +156,16 @@ function QRScanner() {
 
       setCameras(availableCameras);
 
-      const backCamera =
-        availableCameras.find((camera) =>
-          String(camera.label || "")
-            .toLowerCase()
-            .includes("back")
-        ) ||
-        availableCameras.find((camera) =>
-          String(camera.label || "")
-            .toLowerCase()
-            .includes("rear")
-        ) ||
-        availableCameras.find((camera) =>
-          String(camera.label || "")
-            .toLowerCase()
-            .includes("environment")
-        );
+      const preferredCamera = getPreferredBackCamera(availableCameras);
 
-      const defaultCamera =
-        backCamera || availableCameras[availableCameras.length - 1];
+      if (!preferredCamera) {
+        setMessage("No se encontró cámara disponible");
+        return;
+      }
 
-      setSelectedCameraId(defaultCamera.id);
+      setSelectedCameraId(preferredCamera.id);
 
-      await startScanner(defaultCamera.id);
+      await startScanner(preferredCamera.id);
     } catch (err) {
       console.log("❌ Error cargando cámaras:", err);
 
@@ -114,13 +178,17 @@ function QRScanner() {
   const stopScanner = async () => {
     try {
       if (scannerRef.current) {
-        await scannerRef.current.stop().catch(() => {});
-        scannerRef.current.clear();
+        const scanner = scannerRef.current;
 
         scannerRef.current = null;
+
+        await scanner.stop().catch(() => {});
+        scanner.clear();
       }
     } catch (err) {
       console.log("Scanner ya estaba detenido:", err);
+    } finally {
+      isProcessingRef.current = false;
     }
   };
 
@@ -161,7 +229,9 @@ function QRScanner() {
         cameraConfig,
         config,
         async (decodedText) => {
-          if (isProcessingRef.current) return;
+          if (isProcessingRef.current) {
+            return;
+          }
 
           isProcessingRef.current = true;
 
@@ -175,8 +245,6 @@ function QRScanner() {
           playScanSound();
 
           setMessage("Validando cliente...");
-
-          await stopScanner();
 
           await validateCustomerQR(cleanQR);
         },
@@ -204,35 +272,82 @@ function QRScanner() {
     setMessage("");
   };
 
-  const restartScanner = () => {
-    isProcessingRef.current = false;
+  const getCleanQRValue = (decodedText) => {
+    const cleanQRCode = String(decodedText || "").trim();
 
-    setTimeout(() => {
-      startScanner(selectedCameraId);
-    }, 800);
+    if (!cleanQRCode) {
+      return "";
+    }
+
+    if (cleanQRCode.includes("/admin/sales/")) {
+      return cleanQRCode.split("/admin/sales/").pop().trim();
+    }
+
+    if (cleanQRCode.includes("/customer/")) {
+      return cleanQRCode.split("/customer/").pop().trim();
+    }
+
+    if (cleanQRCode.includes("/card/")) {
+      return cleanQRCode.split("/card/").pop().trim();
+    }
+
+    if (cleanQRCode.includes("?qr=")) {
+      return cleanQRCode.split("?qr=").pop().trim();
+    }
+
+    return cleanQRCode;
   };
 
   const validateCustomerQR = async (decodedText) => {
+    const releaseScanner = () => {
+      setTimeout(() => {
+        isProcessingRef.current = false;
+      }, 1200);
+
+      setTimeout(() => {
+        setMessage("");
+      }, 1800);
+    };
+
     try {
+      const qrValue = getCleanQRValue(decodedText);
+
+      console.log("QR LEÍDO:", decodedText);
+      console.log("QR LIMPIO:", qrValue);
+
+      if (!qrValue) {
+        setMessage("QR vacío o inválido");
+        releaseScanner();
+        return;
+      }
+
       const response = await fetch(
         `${API_URL}/api/customers/validate-qr`,
         {
           method: "POST",
-
           headers: {
             "Content-Type": "application/json"
           },
-
           body: JSON.stringify({
-            QRCode: decodedText
+            QRCode: qrValue
           })
         }
       );
 
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
+
+      console.log("RESPUESTA VALIDATE QR:", data);
+
+      if (!data) {
+        setMessage("El backend no respondió correctamente");
+        releaseScanner();
+        return;
+      }
 
       if (data.status === "active") {
         setMessage(`✅ Cliente activo: ${data.customer.FullName}`);
+
+        await stopScanner();
 
         setTimeout(() => {
           window.location.href = `/admin/sales/${data.customer.CardSlug}`;
@@ -243,39 +358,39 @@ function QRScanner() {
 
       if (data.status === "inactive") {
         setMessage(`⚠️ Cliente desactivado: ${data.customer.FullName}`);
-
-        alert(
-          `⚠️ Cliente desactivado\n\n${data.customer.FullName}\n\nNo puede realizar compras hasta ser reactivado.`
-        );
-
-        restartScanner();
-
+        releaseScanner();
         return;
       }
 
       if (data.status === "not_found") {
-        setMessage("❌ Cliente no encontrado");
-
-        alert("❌ Cliente no encontrado en la base de datos");
-
-        restartScanner();
-
+        setMessage("Este código no es de cliente");
+        releaseScanner();
         return;
       }
 
-      setMessage(data.message || "Error validando cliente");
+      if (!response.ok || data.status === "error") {
+        setMessage(
+          data.sqlMessage ||
+          data.error ||
+          data.message ||
+          "Error validando cliente"
+        );
 
-      alert(data.message || "Error validando cliente");
+        releaseScanner();
+        return;
+      }
 
-      restartScanner();
+      setMessage(data.message || "No se pudo validar el cliente");
+      releaseScanner();
     } catch (err) {
       console.log("❌ Error validateCustomerQR:", err);
 
-      setMessage("Error al validar cliente");
+      setMessage(
+        err.message ||
+        "Error al validar cliente"
+      );
 
-      alert("Error al validar cliente");
-
-      restartScanner();
+      releaseScanner();
     }
   };
 

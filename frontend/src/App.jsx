@@ -16,12 +16,18 @@ import DashboardAdmin from "./pages/admin/DashboardAdmin";
 import LoginAdmin from "./pages/admin/LoginAdmin";
 import PrivateRoute from "./components/PrivateRoute";
 import SettingsAdmin from "./pages/admin/SettingsAdmin";
+import ProductReportsAdmin from "./pages/admin/reports/ProductReportsAdmin";
 
 
 function App() {
   return (
     <Routes>
       {/* PUBLIC ROUTES */}
+
+      <Route
+  path="/admin/reports/products"
+  element={<ProductReportsAdmin />}
+/>
 
       <Route
         path="/"

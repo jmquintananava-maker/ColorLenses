@@ -13,36 +13,40 @@ function AdminSidebar() {
 
   const [open, setOpen] = useState(false);
 
- const menu = [
-  {
-    name: "Vender QR",
-    path: "/admin/scan"
-  },
-  {
-    name: "Vender",
-    path: "/admin/sales"
-  },
-  {
-    name: "Clientes",
-    path: "/admin/customers"
-  },
-  {
-    name: "Productos",
-    path: "/admin/products"
-  },
-  {
-    name: "Dashboard",
-    path: "/admin"
-  },
-  {
-    name: "Historial de Ventas",
-    path: "/admin/sales-history"
-  },
-  {
-    name: "Configuración",
-    path: "/admin/settings"
-  }
-];
+  const menu = [
+    {
+      name: "Vender QR",
+      path: "/admin/scan"
+    },
+    {
+      name: "Vender",
+      path: "/admin/sales"
+    },
+    {
+      name: "Clientes",
+      path: "/admin/customers"
+    },
+    {
+      name: "Productos",
+      path: "/admin/products"
+    },
+    {
+      name: "Reportes Excel",
+      path: "/admin/reports/products"
+    },
+    {
+      name: "Dashboard",
+      path: "/admin"
+    },
+    {
+      name: "Historial de Ventas",
+      path: "/admin/sales-history"
+    },
+    {
+      name: "Configuración",
+      path: "/admin/settings"
+    }
+  ];
 
   const logout = () => {
     const confirmLogout = window.confirm(
@@ -57,6 +61,15 @@ function AdminSidebar() {
     setOpen(false);
 
     navigate("/admin/login");
+  };
+
+  const isActiveRoute = (path) => {
+    if (path === "/admin") {
+      return location.pathname === "/admin";
+    }
+
+    return location.pathname === path ||
+      location.pathname.startsWith(`${path}/`);
   };
 
   return (
@@ -104,7 +117,7 @@ function AdminSidebar() {
               key={item.path}
               to={item.path}
               className={
-                location.pathname === item.path
+                isActiveRoute(item.path)
                   ? "active"
                   : ""
               }

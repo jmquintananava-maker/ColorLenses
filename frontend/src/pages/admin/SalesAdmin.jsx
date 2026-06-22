@@ -180,6 +180,55 @@ function SalesAdmin() {
     };
   }, [showProductScanner]);
 
+  const getPreferredBackCamera = (availableCameras) => {
+    if (!availableCameras || availableCameras.length === 0) {
+      return null;
+    }
+
+    const normalizedCameras = availableCameras.map((camera) => ({
+      ...camera,
+      cleanLabel: String(camera.label || "").toLowerCase()
+    }));
+
+    const ultraWideCamera =
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("ultra")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("gran angular")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("wide")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("dual")
+      );
+
+    if (ultraWideCamera) {
+      return ultraWideCamera;
+    }
+
+    const backCamera =
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("back")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("rear")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("environment")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("trasera")
+      );
+
+    if (backCamera) {
+      return backCamera;
+    }
+
+    return availableCameras[availableCameras.length - 1];
+  };
+
   const loadProductCamerasAndStart = async () => {
     try {
       productScanProcessingRef.current = false;
@@ -200,35 +249,23 @@ function SalesAdmin() {
 
       setProductCameras(availableCameras);
 
-      const backCamera =
-        availableCameras.find((camera) =>
-          String(camera.label || "")
-            .toLowerCase()
-            .includes("back")
-        ) ||
-        availableCameras.find((camera) =>
-          String(camera.label || "")
-            .toLowerCase()
-            .includes("rear")
-        ) ||
-        availableCameras.find((camera) =>
-          String(camera.label || "")
-            .toLowerCase()
-            .includes("environment")
+      const preferredCamera =
+        getPreferredBackCamera(availableCameras);
+
+      if (!preferredCamera) {
+        setScannerMessage(
+          "No se encontró cámara disponible"
         );
 
-      const defaultCamera =
-        backCamera ||
-        availableCameras[
-          availableCameras.length - 1
-        ];
+        return;
+      }
 
       setSelectedProductCameraId(
-        defaultCamera.id
+        preferredCamera.id
       );
 
       await startProductScanner(
-        defaultCamera.id
+        preferredCamera.id
       );
     } catch (err) {
       console.log(
@@ -245,19 +282,23 @@ function SalesAdmin() {
   const stopProductScanner = async () => {
     try {
       if (productScannerRef.current) {
-        await productScannerRef.current
+        const scanner = productScannerRef.current;
+
+        productScannerRef.current = null;
+
+        await scanner
           .stop()
           .catch(() => {});
 
-        productScannerRef.current.clear();
-
-        productScannerRef.current = null;
+        scanner.clear();
       }
     } catch (err) {
       console.log(
         "Scanner producto ya estaba detenido:",
         err
       );
+    } finally {
+      productScanProcessingRef.current = false;
     }
   };
 
@@ -1104,37 +1145,88 @@ function SalesAdmin() {
   const handleProductScanCode = async (
     code
   ) => {
+    const releaseProductScanner = (
+      clearDelay = 1800
+    ) => {
+      setTimeout(() => {
+        productScanProcessingRef.current = false;
+      }, 1200);
+
+      setTimeout(() => {
+        setScannerMessage("");
+      }, clearDelay);
+    };
+
     try {
+      const cleanCode =
+        String(code || "").trim();
+
+      if (!cleanCode) {
+        productScanProcessingRef.current = false;
+        return;
+      }
+
+      const lowerCode =
+        cleanCode.toLowerCase();
+
+      const looksLikeCustomerQR =
+        lowerCode.includes("/admin/sales/") ||
+        lowerCode.includes("/card/") ||
+        lowerCode.includes("/customer/");
+
+      if (looksLikeCustomerQR) {
+        setScannerMessage(
+          "Este QR es de cliente. Aquí debes escanear un producto."
+        );
+
+        releaseProductScanner(2200);
+        return;
+      }
+
       setScannerMessage(
-        `Leyendo: ${code}`
+        `Leyendo: ${cleanCode}`
       );
 
       const response =
         await fetch(
-          `${API_URL}/api/products/qr/${encodeURIComponent(code)}`
+          `${API_URL}/api/products/qr/${encodeURIComponent(cleanCode)}`
         );
 
       const data =
-        await response.json();
+        await response
+          .json()
+          .catch(() => null);
 
-      if (!response.ok) {
+      if (!response.ok || !data) {
         setScannerMessage(
-          data.message ||
-          "Producto no encontrado"
+          data?.message ||
+          "Producto no encontrado. Escanea un código de producto."
         );
 
-        alert(
-          data.message ||
-          "Producto no encontrado"
-        );
-
-        restartProductScanner();
-
+        releaseProductScanner(2200);
         return;
       }
 
       const product =
         normalizeVariant(data);
+
+      if (!product.ProductVariantId) {
+        setScannerMessage(
+          "El producto leído no tiene una variante válida."
+        );
+
+        releaseProductScanner(2200);
+        return;
+      }
+
+      if (Number(product.Stock || 0) <= 0) {
+        setScannerMessage(
+          "Este producto no tiene stock disponible."
+        );
+
+        releaseProductScanner(2200);
+        return;
+      }
 
       addProductToCart(product);
 
@@ -1155,18 +1247,15 @@ function SalesAdmin() {
       );
 
       setScannerMessage(
-        "Error al escanear producto"
+        "Error al escanear producto. Intenta de nuevo."
       );
 
-      alert(
-        "Error al escanear producto"
-      );
-
-      restartProductScanner();
+      releaseProductScanner(2200);
     }
   };
 
   /* =========================
+     HANDLE REDEEM POINTS  /* =========================
      HANDLE REDEEM POINTS
   ========================= */
 

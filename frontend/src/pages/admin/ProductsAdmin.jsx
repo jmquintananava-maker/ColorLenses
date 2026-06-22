@@ -550,6 +550,13 @@ function ProductsAdmin() {
     setShowGalleryForm(false);
   };
 
+  const closeProductForm = async () => {
+    await stopCodeScanner();
+
+    setShowForm(false);
+    resetForm();
+  };
+
   const validateForm = () => {
     if (!formData.Category) {
       alert("Selecciona una categoría");
@@ -641,6 +648,33 @@ function ProductsAdmin() {
     });
   };
 
+
+  const findExistingBaseProductOnServer = async (productPayload) => {
+  const response = await fetch(`${API_URL}/api/products/find-base`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      Category: productPayload.Category,
+      Marca: productPayload.Marca,
+      Modelo: productPayload.Modelo
+    })
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data.sqlMessage ||
+      data.message ||
+      "No se pudo buscar el producto base"
+    );
+  }
+
+  return data;
+};
+
   const productVariantAlreadyExists = () => {
     const cleanCategory = normalizeText(formData.Category);
     const cleanMarca = normalizeText(formData.Marca);
@@ -668,188 +702,235 @@ function ProductsAdmin() {
     });
   };
 
-  const saveProduct = async () => {
-    if (isSaving) return;
+ const saveProduct = async () => {
+  if (isSaving) return;
 
-    try {
-      setIsSaving(true);
+  try {
+    setIsSaving(true);
 
-      if (!validateForm()) {
-        setIsSaving(false);
-        return;
-      }
+    if (!validateForm()) {
+      setIsSaving(false);
+      return;
+    }
 
-      if (productVariantAlreadyExists()) {
-        alert(
-          "Ya existe una variante con la misma marca, categoría, producto, color y graduación."
-        );
-
-        setIsSaving(false);
-        return;
-      }
-
-      const imageUrl = await uploadImageIfNeeded();
-
-      const productPayload = {
-        SKU: formData.SKU || "",
-        Category: String(formData.Category || "").trim(),
-        Marca: String(formData.Marca || "").trim(),
-        Modelo: String(formData.Modelo || "").trim(),
-        Description: formData.Description || "",
-        Image: imageUrl || "",
-        Image2: formData.Image2 || "",
-        Image3: formData.Image3 || ""
-      };
-
-      let productId = editingProductId;
-
-      if (!editingVariantId) {
-        const existingBaseProduct = findExistingBaseProduct();
-
-        if (existingBaseProduct && getProductId(existingBaseProduct)) {
-          productId = getProductId(existingBaseProduct);
-        }
-      }
-
-      if (editingVariantId && editingProductId) {
-        const productResponse = await fetch(
-          `${API_URL}/api/products/${editingProductId}`,
-          {
-            method: "PUT",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              ...productPayload,
-              Status: "Activo"
-            })
-          }
-        );
-
-        const productData = await productResponse.json();
-
-        if (!productResponse.ok) {
-          alert(
-            productData.sqlMessage ||
-              productData.message ||
-              "No se pudo actualizar el producto base"
-          );
-
-          setIsSaving(false);
-          return;
-        }
-      }
-
-      if (!editingVariantId && !productId) {
-        const productResponse = await fetch(`${API_URL}/api/products`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(productPayload)
-        });
-
-        const productData = await productResponse.json();
-
-        if (!productResponse.ok) {
-          alert(
-            productData.sqlMessage ||
-              productData.message ||
-              "No se pudo crear el producto base"
-          );
-
-          setIsSaving(false);
-          return;
-        }
-
-        productId = productData.ProductId;
-      }
-
-      if (!productId) {
-        alert("No se pudo obtener el ProductId");
-        setIsSaving(false);
-        return;
-      }
-
-      const cleanPower = Number(formData.Power || 0);
-
-      const cleanPowerLabel =
-        cleanPower === 0
-          ? "Sin graduación"
-          : formData.PowerLabel || cleanPower.toFixed(2);
-
-      const isInternal = formData.CodeMode === "INTERNAL";
-
-      const factoryCode = isInternal
-        ? ""
-        : String(formData.FactoryCode || "").trim();
-
-      const internalCode = isInternal
-        ? String(formData.InternalCode || "").trim()
-        : "";
-
-      const scanCode = isInternal ? internalCode : factoryCode;
-
-      const variantPayload = {
-        ProductId: productId,
-        Color: String(formData.Color || "").trim(),
-        Power: cleanPower,
-        PowerLabel: cleanPowerLabel,
-        Price: Number(formData.Price || 0),
-        Stock: Number(formData.Stock || 0),
-        FactoryCode: factoryCode,
-        InternalCode: internalCode,
-        ScanCode: scanCode,
-        CodeType: isInternal ? "INTERNAL" : formData.CodeType || "BARCODE",
-        Status: "Activo"
-      };
-
-      const variantUrl = editingVariantId
-        ? `${API_URL}/api/product-variants/${editingVariantId}`
-        : `${API_URL}/api/product-variants`;
-
-      const variantMethod = editingVariantId ? "PUT" : "POST";
-
-      const variantResponse = await fetch(variantUrl, {
-        method: variantMethod,
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(variantPayload)
-      });
-
-      const variantData = await variantResponse.json();
-
-      if (!variantResponse.ok) {
-        alert(
-          variantData.sqlMessage ||
-            variantData.message ||
-            "No se pudo guardar la variante"
-        );
-
-        setIsSaving(false);
-        return;
-      }
-
-      await loadProducts();
-
-      resetForm();
-      setShowForm(false);
-      setCurrentPage(1);
-
+    if (productVariantAlreadyExists()) {
       alert(
-        editingVariantId
-          ? "✅ Variante actualizada"
-          : "✅ Variante creada correctamente"
+        "Ya existe una variante con la misma marca, categoría, producto, color y graduación."
       );
 
       setIsSaving(false);
-    } catch (err) {
-      console.log("❌ Error save product:", err);
-      alert(err.message || "Error al guardar producto");
-      setIsSaving(false);
+      return;
     }
-  };
+
+    const imageUrl = await uploadImageIfNeeded();
+
+    const productPayload = {
+      SKU: formData.SKU || "",
+      Category: String(formData.Category || "").trim(),
+      Marca: String(formData.Marca || "").trim(),
+      Modelo: String(formData.Modelo || "").trim(),
+      Description: formData.Description || "",
+      Image: imageUrl || "",
+      Image2: formData.Image2 || "",
+      Image3: formData.Image3 || ""
+    };
+
+    let productId = editingProductId;
+
+   const serverBaseProduct =
+  await findExistingBaseProductOnServer(productPayload);
+
+const existingBaseProductId =
+  serverBaseProduct?.found && serverBaseProduct?.ProductId
+    ? serverBaseProduct.ProductId
+    : null;
+
+    /*
+      CASO 1:
+      Estoy editando una variante y el producto base destino YA existe.
+      Ejemplo:
+      Natural + Urban Layer + Breeze gray ya existe.
+
+      Entonces NO actualizamos Products porque daría duplicate.
+      Solo movemos la variante a ese ProductId existente.
+    */
+    if (
+      editingVariantId &&
+      existingBaseProductId &&
+      String(existingBaseProductId) !== String(editingProductId)
+    ) {
+      productId = existingBaseProductId;
+    }
+
+    /*
+      CASO 2:
+      Estoy creando variante nueva y ya existe el producto base.
+      Usamos ese ProductId.
+    */
+    if (!editingVariantId && existingBaseProductId) {
+      productId = existingBaseProductId;
+    }
+
+    /*
+      CASO 3:
+      Estoy editando variante, pero NO existe otro producto base igual.
+      Aquí sí actualizamos el producto base actual.
+    */
+    if (
+      editingVariantId &&
+      editingProductId &&
+      (
+        !existingBaseProductId ||
+        String(existingBaseProductId) === String(editingProductId)
+      )
+    ) {
+      const productResponse = await fetch(
+        `${API_URL}/api/products/${editingProductId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            ...productPayload,
+            Status: "Activo"
+          })
+        }
+      );
+
+      const productData = await productResponse.json();
+
+      if (!productResponse.ok) {
+        alert(
+          productData.sqlMessage ||
+            productData.message ||
+            "No se pudo actualizar el producto base"
+        );
+
+        setIsSaving(false);
+        return;
+      }
+
+      productId = editingProductId;
+    }
+
+    /*
+      CASO 4:
+      Estoy creando producto/variante y no existe producto base.
+      Creamos Products primero.
+    */
+    if (!editingVariantId && !productId) {
+      const productResponse = await fetch(`${API_URL}/api/products`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(productPayload)
+      });
+
+      const productData = await productResponse.json();
+
+      if (!productResponse.ok) {
+        alert(
+          productData.sqlMessage ||
+            productData.message ||
+            "No se pudo crear el producto base"
+        );
+
+        setIsSaving(false);
+        return;
+      }
+
+      productId = productData.ProductId;
+    }
+
+    if (!productId) {
+      alert("No se pudo obtener el ProductId");
+      setIsSaving(false);
+      return;
+    }
+
+    const cleanPower = Number(formData.Power || 0);
+
+    const cleanPowerLabel =
+      cleanPower === 0
+        ? "Sin graduación"
+        : formData.PowerLabel || cleanPower.toFixed(2);
+
+    const isInternal = formData.CodeMode === "INTERNAL";
+
+    const factoryCode = isInternal
+      ? ""
+      : String(formData.FactoryCode || "").trim();
+
+    const internalCode = isInternal
+      ? String(formData.InternalCode || "").trim()
+      : "";
+
+    const scanCode = isInternal ? internalCode : factoryCode;
+
+    const cleanStock = Number(formData.Stock || 0);
+
+    const variantPayload = {
+      ProductId: productId,
+      Color: String(formData.Color || "").trim(),
+      Power: cleanPower,
+      PowerLabel: cleanPowerLabel,
+      Price: Number(formData.Price || 0),
+      Stock: cleanStock,
+      FactoryCode: factoryCode,
+      InternalCode: internalCode,
+      ScanCode: scanCode,
+      CodeType: isInternal ? "INTERNAL" : formData.CodeType || "BARCODE",
+      Status: cleanStock <= 0 ? "Inactivo" : "Activo"
+    };
+
+    const variantUrl = editingVariantId
+      ? `${API_URL}/api/product-variants/${editingVariantId}`
+      : `${API_URL}/api/product-variants`;
+
+    const variantMethod = editingVariantId ? "PUT" : "POST";
+
+    const variantResponse = await fetch(variantUrl, {
+      method: variantMethod,
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(variantPayload)
+    });
+
+    const variantData = await variantResponse.json();
+
+    if (!variantResponse.ok) {
+      alert(
+        variantData.sqlMessage ||
+          variantData.message ||
+          "No se pudo guardar la variante"
+      );
+
+      setIsSaving(false);
+      return;
+    }
+
+    await loadProducts();
+
+    resetForm();
+    setShowForm(false);
+    setCurrentPage(1);
+
+    alert(
+      editingVariantId
+        ? "✅ Variante actualizada"
+        : "✅ Variante creada correctamente"
+    );
+
+    setIsSaving(false);
+  } catch (err) {
+    console.log("❌ Error save product:", err);
+    alert(err.message || "Error al guardar producto");
+    setIsSaving(false);
+  }
+};
 
   const editProduct = (product) => {
     const variantId = product.ProductVariantId || product.Id;
@@ -1021,6 +1102,18 @@ function ProductsAdmin() {
     }
   };
 
+  const releaseCodeScanner = (
+    clearDelay = 1800
+  ) => {
+    setTimeout(() => {
+      codeScannerProcessingRef.current = false;
+    }, 1000);
+
+    setTimeout(() => {
+      setScannerMessage("");
+    }, clearDelay);
+  };
+
   const stopCodeScanner = async () => {
     try {
       if (codeScannerRef.current) {
@@ -1101,6 +1194,22 @@ function ProductsAdmin() {
             return;
           }
 
+          const lowerCode = cleanCode.toLowerCase();
+
+          const looksLikeCustomerQR =
+            lowerCode.includes("/admin/sales/") ||
+            lowerCode.includes("/card/") ||
+            lowerCode.includes("/customer/");
+
+          if (looksLikeCustomerQR) {
+            setScannerMessage(
+              "Este QR es de cliente. Aquí debes escanear un código de producto."
+            );
+
+            releaseCodeScanner(2200);
+            return;
+          }
+
           playScanSound();
 
           setFormData((prev) => ({
@@ -1137,9 +1246,62 @@ function ProductsAdmin() {
     }
   };
 
+  const getPreferredScannerCamera = (availableCameras) => {
+    if (!availableCameras || availableCameras.length === 0) {
+      return null;
+    }
+
+    const normalizedCameras = availableCameras.map((camera) => ({
+      ...camera,
+      cleanLabel: String(camera.label || "").toLowerCase()
+    }));
+
+    const ultraWideCamera =
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("ultra")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("gran angular")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("wide")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("dual")
+      );
+
+    if (ultraWideCamera) {
+      return ultraWideCamera;
+    }
+
+    const backCamera =
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("back")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("rear")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("environment")
+      ) ||
+      normalizedCameras.find((camera) =>
+        camera.cleanLabel.includes("trasera")
+      );
+
+    if (backCamera) {
+      return backCamera;
+    }
+
+    return availableCameras[availableCameras.length - 1];
+  };
+
   const openCodeScanner = async () => {
     try {
       unlockScanSound();
+
+      await stopCodeScanner();
+
+      codeScannerProcessingRef.current = false;
 
       setShowCodeScanner(true);
       setScannerMessage("Cargando cámara...");
@@ -1153,26 +1315,26 @@ function ProductsAdmin() {
 
       setScannerCameras(cameras);
 
-      const backCamera =
-        cameras.find((camera) =>
-          String(camera.label || "").toLowerCase().includes("back")
-        ) ||
-        cameras.find((camera) =>
-          String(camera.label || "").toLowerCase().includes("rear")
-        ) ||
-        cameras.find((camera) =>
-          String(camera.label || "").toLowerCase().includes("environment")
-        ) ||
-        cameras[cameras.length - 1];
+      const preferredCamera = getPreferredScannerCamera(cameras);
 
-      setSelectedScannerCameraId(backCamera.id);
+      if (!preferredCamera) {
+        setScannerMessage("No se encontró cámara disponible");
+        return;
+      }
+
+      setSelectedScannerCameraId(preferredCamera.id);
 
       setTimeout(() => {
-        startCodeScanner(backCamera.id);
+        startCodeScanner(preferredCamera.id);
       }, 300);
     } catch (err) {
       console.log("❌ Error openCodeScanner:", err);
-      setScannerMessage("No se pudo abrir el escáner");
+
+      codeScannerProcessingRef.current = false;
+
+      setScannerMessage(
+        "No se pudo abrir el escáner. Revisa permisos o cierra otra pestaña que use cámara."
+      );
     }
   };
 
@@ -1387,10 +1549,9 @@ function ProductsAdmin() {
             onClick={() => {
               setViewMode("active");
               setSearch("");
-              setShowForm(false);
+              void closeProductForm();
               closeGalleryForm();
               clearFilters();
-              resetForm();
             }}
           >
             Activos
@@ -1405,10 +1566,9 @@ function ProductsAdmin() {
             onClick={() => {
               setViewMode("inactive");
               setSearch("");
-              setShowForm(false);
+              void closeProductForm();
               closeGalleryForm();
               clearFilters();
-              resetForm();
             }}
           >
             Inactivos
@@ -1416,7 +1576,16 @@ function ProductsAdmin() {
         </div>
 
         {showForm && (
-          <div className="admin-form-card">
+          <div
+            className="product-admin-modal-overlay"
+            onClick={() => {
+              void closeProductForm();
+            }}
+          >
+            <div
+              className="admin-form-card product-admin-modal-card"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="admin-form-header">
               <h2>
                 {editingVariantId
@@ -1427,8 +1596,7 @@ function ProductsAdmin() {
               <button
                 className="admin-close-btn"
                 onClick={() => {
-                  setShowForm(false);
-                  resetForm();
+                  void closeProductForm();
                 }}
               >
                 ✕
@@ -1684,6 +1852,7 @@ function ProductsAdmin() {
                     : "Guardar"}
               </button>
             </div>
+          </div>
           </div>
         )}
 

@@ -244,6 +244,59 @@ app.post("/api/products", async (req, res) => {
   }
 });
 
+
+app.post("/api/products/find-base", async (req, res) => {
+  try {
+    const {
+      Category,
+      Marca,
+      Modelo
+    } = req.body;
+
+    if (!Category || !Marca || !Modelo) {
+      return res.status(400).json({
+        found: false,
+        message: "Category, Marca y Modelo son requeridos"
+      });
+    }
+
+    const [rows] = await db.execute(
+      "CALL FindProductBase(?,?,?)",
+      [
+        safeString(Category),
+        safeString(Marca),
+        safeString(Modelo)
+      ]
+    );
+
+    const product = rows[0]?.[0];
+
+    if (!product) {
+      return res.json({
+        found: false,
+        ProductId: null
+      });
+    }
+
+    res.json({
+      found: true,
+      ProductId: product.ProductId,
+      product
+    });
+  } catch (err) {
+    console.log("❌ Error find product base:", err);
+
+    res.status(500).json({
+      found: false,
+      message: "Error buscando producto base",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+
+
 app.put("/api/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -380,6 +433,101 @@ app.get("/api/product-variants-inactive", async (req, res) => {
   }
 });
 
+app.get("/api/reports/products/export", async (req, res) => {
+  try {
+    const {
+      marca = "",
+      category = "",
+      modelo = "",
+      color = "",
+      powerType = "all",
+      status = "active",
+      stockMode = "all",
+      codeType = "all"
+    } = req.query;
+
+    const [rows] = await db.execute(
+      "CALL GetProductExportReport(?,?,?,?,?,?,?,?)",
+      [
+        safeString(marca),
+        safeString(category),
+        safeString(modelo),
+        safeString(color),
+        safeString(powerType),
+        safeString(status),
+        safeString(stockMode),
+        safeString(codeType)
+      ]
+    );
+
+    const data = rows[0] || [];
+
+    const headers = [
+      "ProductVariantId",
+      "ProductId",
+      "Category",
+      "Marca",
+      "Modelo",
+      "Color",
+      "Power",
+      "PowerLabel",
+      "Price",
+      "Stock",
+      "FactoryCode",
+      "InternalCode",
+      "ScanCode",
+      "CodeType",
+      "VariantStatus",
+      "ProductStatus",
+      "Image",
+      "Image2",
+      "Image3"
+    ];
+
+    const escapeCsvValue = (value) => {
+      if (value === null || value === undefined) {
+        return "";
+      }
+
+      const cleanValue = String(value).replace(/"/g, '""');
+
+      return `"${cleanValue}"`;
+    };
+
+    const csvRows = [
+      headers.join(","),
+      ...data.map((item) =>
+        headers
+          .map((header) => escapeCsvValue(item[header]))
+          .join(",")
+      )
+    ];
+
+    const csvContent = "\uFEFF" + csvRows.join("\n");
+
+    const fileName = `product-report-${Date.now()}.csv`;
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${fileName}"`
+    );
+
+    res.send(csvContent);
+  } catch (err) {
+    console.log("❌ Error export product report:", err);
+
+    res.status(500).json({
+      message: "Error generando reporte de productos",
+      error: err.message,
+      sqlMessage: err.sqlMessage
+    });
+  }
+});
+
+
+
 app.get("/api/products/:id/variants", async (req, res) => {
   try {
     const { id } = req.params;
@@ -514,6 +662,7 @@ app.put("/api/product-variants/:id", async (req, res) => {
     const { id } = req.params;
 
     const {
+      ProductId,
       Color,
       Power,
       PowerLabel,
@@ -526,58 +675,87 @@ app.put("/api/product-variants/:id", async (req, res) => {
       Status
     } = req.body;
 
-    let finalFactoryCode = String(FactoryCode || "").trim();
-    let finalInternalCode = String(InternalCode || "").trim();
-    let finalScanCode = String(ScanCode || "").trim();
-    let finalCodeType = String(CodeType || "").trim();
+    const cleanString = (value) => {
+      return String(value || "").trim();
+    };
 
-    if (!finalScanCode) {
-      finalInternalCode = finalInternalCode || `CL-${Date.now()}`;
-      finalScanCode = finalInternalCode;
-      finalCodeType = "INTERNAL";
+    const cleanNumber = (value) => {
+      const number = Number(value);
+
+      if (Number.isNaN(number)) {
+        return 0;
+      }
+
+      return number;
+    };
+
+    const cleanProductId = cleanNumber(ProductId);
+
+    if (!cleanProductId) {
+      return res.status(400).json({
+        message: "ProductId es requerido para actualizar la variante"
+      });
     }
 
-    if (!finalCodeType) {
-      finalCodeType = finalFactoryCode ? "BARCODE" : "INTERNAL";
-    }
-
-    const cleanPower = safeNumber(Power);
+    const cleanPower = cleanNumber(Power);
 
     const cleanPowerLabel =
-      Number(cleanPower) === 0
+      cleanString(PowerLabel) ||
+      (cleanPower === 0
         ? "Sin graduación"
-        : safeString(PowerLabel || Number(cleanPower).toFixed(2));
+        : cleanPower.toFixed(2));
+
+    const finalCodeType =
+      cleanString(CodeType) || "BARCODE";
+
+    const finalFactoryCode =
+      finalCodeType === "INTERNAL"
+        ? ""
+        : cleanString(FactoryCode);
+
+    const finalInternalCode =
+      finalCodeType === "INTERNAL"
+        ? cleanString(InternalCode || ScanCode)
+        : cleanString(InternalCode);
+
+    const finalScanCode =
+      cleanString(ScanCode) ||
+      finalFactoryCode ||
+      finalInternalCode;
+
+    const cleanStock = cleanNumber(Stock);
+
+    const finalStatus =
+      cleanStock <= 0
+        ? "Inactivo"
+        : cleanString(Status || "Activo");
 
     await db.execute(
-      "CALL UpdateProductVariant(?,?,?,?,?,?,?,?,?,?,?)",
+      "CALL UpdateProductVariant(?,?,?,?,?,?,?,?,?,?,?,?)",
       [
-        id,
-        safeString(Color),
+        cleanNumber(id),
+        cleanProductId,
+        cleanString(Color),
         cleanPower,
         cleanPowerLabel,
-        safeNumber(Price),
-        safeNumber(Stock),
+        cleanNumber(Price),
+        cleanStock,
         finalFactoryCode,
         finalInternalCode,
         finalScanCode,
         finalCodeType,
-        safeString(Status || "Activo")
+        finalStatus
       ]
     );
 
     res.json({
-      success: true,
-      ScanCode: finalScanCode,
-      FactoryCode: finalFactoryCode || null,
-      InternalCode: finalInternalCode || null,
-      CodeType: finalCodeType,
-      message: "✅ Variante actualizada"
+      message: "Variante actualizada correctamente"
     });
   } catch (err) {
-    console.log("❌ Error update product variant:", err);
+    console.error("❌ Error update product variant:", err);
 
     res.status(500).json({
-      message: "Error actualizando variante",
+      message: "Error al actualizar variante",
       error: err.message,
       sqlMessage: err.sqlMessage
     });
