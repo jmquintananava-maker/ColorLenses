@@ -12,7 +12,6 @@ const PAGE_SIZE = 10;
 
 function Catalog() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
   const [products, setProducts] = useState([]);
 
   const [search, setSearch] = useState("");
@@ -41,6 +40,22 @@ function Catalog() {
     return Number(product.ProductVariantId || product.Id || 0);
   };
 
+  const getProductKey = (product) => {
+    return [
+      normalizeText(product.Marca),
+      normalizeText(product.Modelo),
+      normalizeText(product.Color)
+    ].join("|");
+  };
+
+  const getImageUrl = (image) => {
+    if (!image) return "";
+
+    return String(image).startsWith("http")
+      ? image
+      : `${API_URL}${image}`;
+  };
+
   const loadProducts = async () => {
     try {
       const response = await fetch(`${API_URL}/api/product-variants`);
@@ -50,55 +65,44 @@ function Catalog() {
         ? data
             .map((product) => ({
               ...product,
-
               ProductVariantId:
                 product.ProductVariantId ||
                 product.VariantId ||
                 product.Id,
-
               ProductId:
                 product.ProductId ||
                 product.ProductID,
-
               Marca:
                 product.Marca || "",
-
               Modelo:
                 product.Modelo || "",
-
               Category:
                 product.Category || "",
-
               Color:
                 product.Color || "",
-
               Power:
                 product.Power ?? 0,
-
               PowerLabel:
                 product.PowerLabel ||
                 (Number(product.Power || 0) === 0
                   ? "Sin graduación"
                   : Number(product.Power || 0).toFixed(2)),
-
               Price:
                 Number(product.Price || 0),
-
               Stock:
                 Number(product.Stock || 0),
-
               Image:
                 product.Image || "",
-
               Image2:
                 product.Image2 || "",
-
               Image3:
                 product.Image3 || "",
-
               Description:
                 product.Description || "",
-
+              Status:
+                product.Status || "Activo",
+              ProductStatus:
+                product.ProductStatus || "Activo",
               ScanCode:
                 product.ScanCode ||
                 product.FactoryCode ||
@@ -121,35 +125,75 @@ function Catalog() {
     }
   };
 
+  const catalogBaseProducts = useMemo(() => {
+    const baseMap = new Map();
+
+    products
+      .filter((product) => Number(product.Power || 0) === 0)
+      .forEach((product) => {
+        const key = getProductKey(product);
+
+        if (!key || key === "||") return;
+
+        const existing = baseMap.get(key);
+
+        if (!existing) {
+          baseMap.set(key, product);
+          return;
+        }
+
+        const existingStock = Number(existing.Stock || 0);
+        const currentStock = Number(product.Stock || 0);
+
+        if (existingStock <= 0 && currentStock > 0) {
+          baseMap.set(key, product);
+        }
+      });
+
+    return Array.from(baseMap.values()).sort((a, b) => {
+      const brandCompare =
+        String(a.Marca || "").localeCompare(String(b.Marca || ""));
+
+      if (brandCompare !== 0) return brandCompare;
+
+      const modelCompare =
+        String(a.Modelo || "").localeCompare(String(b.Modelo || ""));
+
+      if (modelCompare !== 0) return modelCompare;
+
+      return String(a.Color || "").localeCompare(String(b.Color || ""));
+    });
+  }, [products]);
+
   const uniqueBrands = useMemo(() => {
-    const values = products
+    const values = catalogBaseProducts
       .map((product) => product.Marca)
       .filter(Boolean);
 
     return [...new Set(values)].sort((a, b) =>
       String(a).localeCompare(String(b))
     );
-  }, [products]);
+  }, [catalogBaseProducts]);
 
   const uniqueCategories = useMemo(() => {
-    const values = products
+    const values = catalogBaseProducts
       .map((product) => product.Category)
       .filter(Boolean);
 
     return [...new Set(values)].sort((a, b) =>
       String(a).localeCompare(String(b))
     );
-  }, [products]);
+  }, [catalogBaseProducts]);
 
   const uniqueColors = useMemo(() => {
-    const values = products
+    const values = catalogBaseProducts
       .map((product) => product.Color)
       .filter(Boolean);
 
     return [...new Set(values)].sort((a, b) =>
       String(a).localeCompare(String(b))
     );
-  }, [products]);
+  }, [catalogBaseProducts]);
 
   const filteredProducts = useMemo(() => {
     const cleanSearch = normalizeText(search);
@@ -157,19 +201,15 @@ function Catalog() {
     const cleanCategory = normalizeText(categoryFilter);
     const cleanColor = normalizeText(colorFilter);
 
-    return products.filter((product) => {
-      const productBrand = normalizeText(product.Marca);
-      const productCategory = normalizeText(product.Category);
-      const productColor = normalizeText(product.Color);
-
+    return catalogBaseProducts.filter((product) => {
       const matchesBrand =
-        !cleanBrand || productBrand === cleanBrand;
+        !cleanBrand || normalizeText(product.Marca) === cleanBrand;
 
       const matchesCategory =
-        !cleanCategory || productCategory === cleanCategory;
+        !cleanCategory || normalizeText(product.Category) === cleanCategory;
 
       const matchesColor =
-        !cleanColor || productColor === cleanColor;
+        !cleanColor || normalizeText(product.Color) === cleanColor;
 
       const matchesSearch =
         !cleanSearch ||
@@ -188,12 +228,38 @@ function Catalog() {
       );
     });
   }, [
-    products,
+    catalogBaseProducts,
     search,
     brandFilter,
     categoryFilter,
     colorFilter
   ]);
+
+  const selectedProductVariants = useMemo(() => {
+    if (!selectedProduct) return [];
+
+    const selectedKey = getProductKey(selectedProduct);
+
+    return products
+      .filter((product) => getProductKey(product) === selectedKey)
+      .sort((a, b) => {
+        const aPower = Number(a.Power || 0);
+        const bPower = Number(b.Power || 0);
+
+        const aPowerGroup = aPower === 0 ? 0 : 1;
+        const bPowerGroup = bPower === 0 ? 0 : 1;
+
+        if (aPowerGroup !== bPowerGroup) {
+          return aPowerGroup - bPowerGroup;
+        }
+
+        if (aPower !== bPower) {
+          return aPower - bPower;
+        }
+
+        return String(a.Category || "").localeCompare(String(b.Category || ""));
+      });
+  }, [products, selectedProduct]);
 
   const totalPages = Math.max(
     1,
@@ -255,15 +321,7 @@ function Catalog() {
       product.Image3
     ].filter(Boolean);
 
-    if (images.length === 0) {
-      return [];
-    }
-
-    return images.map((image) =>
-      image.startsWith("http")
-        ? image
-        : `${API_URL}${image}`
-    );
+    return images.map((image) => getImageUrl(image));
   };
 
   const openProductModal = (product) => {
@@ -298,12 +356,14 @@ function Catalog() {
     );
   };
 
-  const buildWhatsAppMessage = (product) => {
+  const buildWhatsAppMessage = (product, variant = null) => {
+    const selectedVariant = variant || product;
+
     const text = `Hola, me interesa este lente:
 ${product.Marca} ${product.Modelo}
 Color: ${product.Color}
-Categoría: ${product.Category}
-Precio: ${formatPrice(product.Price)}`;
+Graduación: ${selectedVariant.PowerLabel}
+Precio: ${formatPrice(selectedVariant.Price)}`;
 
     return `https://wa.me/?text=${encodeURIComponent(text)}`;
   };
@@ -321,7 +381,8 @@ Precio: ${formatPrice(product.Price)}`;
         <h2>Catálogo</h2>
 
         <p>
-          Descubre todos nuestros lentes premium
+          Descubre nuestros lentes. Las graduaciones disponibles aparecen dentro
+          de cada producto.
         </p>
       </div>
 
@@ -406,23 +467,18 @@ Precio: ${formatPrice(product.Price)}`;
         </div>
       </section>
 
-      <section className="catalog-grid">
+      <section className="catalog-grid catalog-grid-two-columns">
         {paginatedProducts.map((product) => (
           <div
-            key={product.ProductVariantId}
+            key={`${product.Marca}-${product.Modelo}-${product.Color}-${product.ProductVariantId}`}
             className="catalog-product-click"
             onClick={() => openProductModal(product)}
           >
             <ProductCard
-              image={
-                product.Image
-                  ? `${API_URL}${product.Image}`
-                  : ""
-              }
+              image={getImageUrl(product.Image)}
               name={product.Modelo}
               color={getProductSubtitle(product)}
               price={formatPrice(product.Price)}
-              tag={product.Category}
             />
           </div>
         ))}
@@ -543,10 +599,6 @@ Precio: ${formatPrice(product.Price)}`;
             </div>
 
             <div className="catalog-modal-info">
-              <span className="catalog-modal-tag">
-                {selectedProduct.Category}
-              </span>
-
               <h2>
                 {selectedProduct.Modelo}
               </h2>
@@ -569,12 +621,6 @@ Precio: ${formatPrice(product.Price)}`;
                 </p>
 
                 <p>
-                  <strong>Categoría:</strong>
-                  {" "}
-                  {selectedProduct.Category || "No especificada"}
-                </p>
-
-                <p>
                   <strong>Disponibilidad:</strong>
                   {" "}
                   {Number(selectedProduct.Stock || 0) > 0
@@ -587,6 +633,51 @@ Precio: ${formatPrice(product.Price)}`;
                 {selectedProduct.Description ||
                   "Lente de contacto premium ideal para realzar tu mirada con un acabado natural y elegante."}
               </p>
+
+              <div className="catalog-variants-section">
+                <h4>
+                  Graduaciones disponibles
+                </h4>
+
+                {selectedProductVariants.length > 0 ? (
+                  <div className="catalog-variants-list">
+                    {selectedProductVariants.map((variant) => (
+                      <div
+                        key={variant.ProductVariantId}
+                        className="catalog-variant-row"
+                      >
+                        <div>
+                          <strong>
+                            {variant.PowerLabel || "Sin graduación"}
+                          </strong>
+
+                          <span>
+                            {formatPrice(variant.Price)}
+                          </span>
+
+                          <small>
+                            {Number(variant.Stock || 0) > 0
+                              ? `Disponible · Stock: ${variant.Stock}`
+                              : "Agotado"}
+                          </small>
+                        </div>
+
+                        <a
+                          href={buildWhatsAppMessage(selectedProduct, variant)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Preguntar
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="catalog-variants-empty">
+                    No hay variantes activas para este producto.
+                  </div>
+                )}
+              </div>
 
               <a
                 className="catalog-modal-whatsapp"

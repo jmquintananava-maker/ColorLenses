@@ -4,7 +4,6 @@ import {
   House,
   Grid2X2,
   Heart,
-  Tag,
   User
 } from "lucide-react";
 
@@ -12,8 +11,6 @@ import {
   Link,
   useLocation
 } from "react-router-dom";
-
-
 
 function Sidebar({ isOpen, setIsOpen }) {
   const location = useLocation();
@@ -35,23 +32,27 @@ function Sidebar({ isOpen, setIsOpen }) {
       path: "/favorites"
     },
     {
-      name: "Promociones",
-      icon: <Tag size={20} />,
-      path: "/promotions"
-    },
-    {
       name: "Perfil",
       icon: <User size={20} />,
       path: "/profile"
     }
   ];
 
+  const isActiveRoute = (path) => {
+    if (path === "/") {
+      return location.pathname === "/";
+    }
+
+    return location.pathname === path ||
+      location.pathname.startsWith(`${path}/`);
+  };
+
   return (
     <>
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            className="sidebar-overlay"
+            className="site-sidebar-overlay"
             onClick={() => setIsOpen(false)}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -62,10 +63,10 @@ function Sidebar({ isOpen, setIsOpen }) {
       </AnimatePresence>
 
       <motion.aside
-        className="sidebar"
+        className="sidebar site-sidebar-panel"
         initial={false}
         animate={{
-          x: isOpen ? 0 : -340
+          x: isOpen ? 0 : -360
         }}
         transition={{
           type: "spring",
@@ -91,14 +92,18 @@ function Sidebar({ isOpen, setIsOpen }) {
 
         <nav className="sidebar-links">
           {links.map((link) => {
-            const isActive = location.pathname === link.path;
+            const isActive = isActiveRoute(link.path);
 
             return (
               <Link
                 key={link.name}
                 to={link.path}
                 onClick={() => setIsOpen(false)}
-                className={isActive ? "sidebar-link active" : "sidebar-link"}
+                className={
+                  isActive
+                    ? "sidebar-link active"
+                    : "sidebar-link"
+                }
               >
                 <span className="sidebar-icon">
                   {link.icon}

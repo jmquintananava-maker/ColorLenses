@@ -36,6 +36,21 @@ function ProductsAdmin() {
   const [viewMode, setViewMode] = useState("active");
   const [search, setSearch] = useState("");
 
+  const [codeSearch, setCodeSearch] = useState("");
+  const [codeSearchMessage, setCodeSearchMessage] = useState("");
+  const [isCodeSearching, setIsCodeSearching] = useState(false);
+
+  const [showSearchCodeScanner, setShowSearchCodeScanner] = useState(false);
+  const [searchScannerCameras, setSearchScannerCameras] = useState([]);
+  const [
+    selectedSearchScannerCameraId,
+    setSelectedSearchScannerCameraId
+  ] = useState("");
+  const [
+    isSearchCodeScannerStarting,
+    setIsSearchCodeScannerStarting
+  ] = useState(false);
+
   const [brandFilter, setBrandFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [productFilter, setProductFilter] = useState("");
@@ -142,6 +157,84 @@ function ProductsAdmin() {
     return String(image).startsWith("http")
       ? image
       : `${API_URL}${image}`;
+  };
+
+  const normalizeProductVariant = (product) => {
+    return {
+      ...product,
+
+      ProductVariantId:
+        product.ProductVariantId ||
+        product.VariantId ||
+        product.Id,
+
+      ProductId:
+        product.ProductId ||
+        product.ProductID,
+
+      SKU:
+        product.SKU || "",
+
+      Category:
+        product.Category || "",
+
+      Marca:
+        product.Marca || "",
+
+      Modelo:
+        product.Modelo || "",
+
+      Description:
+        product.Description || "",
+
+      Image:
+        product.Image || "",
+
+      Image2:
+        product.Image2 || "",
+
+      Image3:
+        product.Image3 || "",
+
+      Color:
+        product.Color || "",
+
+      Power:
+        product.Power ?? 0,
+
+      PowerLabel:
+        product.PowerLabel ||
+        (Number(product.Power || 0) === 0
+          ? "Sin graduación"
+          : Number(product.Power || 0).toFixed(2)),
+
+      Price:
+        Number(product.Price || 0),
+
+      Stock:
+        Number(product.Stock || 0),
+
+      FactoryCode:
+        product.FactoryCode || "",
+
+      InternalCode:
+        product.InternalCode || "",
+
+      ScanCode:
+        product.ScanCode ||
+        product.FactoryCode ||
+        product.InternalCode ||
+        "",
+
+      CodeType:
+        product.CodeType || "INTERNAL",
+
+      Status:
+        product.Status || "Activo",
+
+      ProductStatus:
+        product.ProductStatus || "Activo"
+    };
   };
 
   const unlockScanSound = () => {
@@ -256,7 +349,9 @@ function ProductsAdmin() {
       const data = await response.json();
 
       const sortedData = Array.isArray(data)
-        ? [...data].sort((a, b) => getVariantId(b) - getVariantId(a))
+        ? [...data]
+            .map(normalizeProductVariant)
+            .sort((a, b) => getVariantId(b) - getVariantId(a))
         : [];
 
       setProducts(sortedData);
@@ -397,7 +492,336 @@ function ProductsAdmin() {
     setCategoryFilter("");
     setProductFilter("");
     setPowerFilter("");
+    setCodeSearch("");
+    setCodeSearchMessage("");
+    setShowSearchCodeScanner(false);
     setCurrentPage(1);
+  };
+
+  const findVariantByCode = (code, list = products) => {
+    const cleanCode = normalizeText(code);
+
+    if (!cleanCode) return null;
+
+    return list.find((product) => {
+      const candidates = [
+        product.ScanCode,
+        product.FactoryCode,
+        product.InternalCode,
+        product.ProductVariantId,
+        product.Id
+      ]
+        .map((value) => normalizeText(value))
+        .filter(Boolean);
+
+      return candidates.some((candidate) => {
+        return candidate === cleanCode || candidate.includes(cleanCode);
+      });
+    });
+  };
+
+  const getApiProductFromResponse = (data) => {
+    if (!data) return null;
+
+    if (Array.isArray(data)) {
+      return data[0] || null;
+    }
+
+    if (data.product) return data.product;
+    if (data.variant) return data.variant;
+    if (data.item) return data.item;
+    if (data.data) return getApiProductFromResponse(data.data);
+
+    return data;
+  };
+
+  const searchProductByCode = async (forcedCode = null) => {
+    if (isCodeSearching) return;
+
+    const cleanCode = String(forcedCode || codeSearch || "").trim();
+
+    if (!cleanCode) {
+      setCodeSearchMessage("Escribe o escanea un código primero.");
+      return;
+    }
+
+    try {
+      setIsCodeSearching(true);
+      setCodeSearchMessage("Buscando producto...");
+
+      let foundProduct = findVariantByCode(cleanCode, products);
+
+      if (foundProduct) {
+        setCodeSearchMessage(
+          `✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`
+        );
+
+        editProduct(foundProduct);
+        setIsCodeSearching(false);
+        return;
+      }
+
+      try {
+        const scanResponse = await fetch(
+          `${API_URL}/api/products/scan/${encodeURIComponent(cleanCode)}`
+        );
+
+        const scanData = await scanResponse.json().catch(() => null);
+
+        if (scanResponse.ok) {
+          const apiProduct = getApiProductFromResponse(scanData);
+
+          if (apiProduct) {
+            foundProduct = normalizeProductVariant(apiProduct);
+          }
+        }
+      } catch (err) {
+        console.log("No se encontró con endpoint scan:", err);
+      }
+
+      if (foundProduct && (foundProduct.ProductVariantId || foundProduct.Id)) {
+        setCodeSearchMessage(
+          `✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`
+        );
+
+        editProduct(foundProduct);
+        setIsCodeSearching(false);
+        return;
+      }
+
+      const [activeRes, inactiveRes] = await Promise.all([
+        fetch(`${API_URL}/api/product-variants`),
+        fetch(`${API_URL}/api/product-variants-inactive`)
+      ]);
+
+      const activeData = await activeRes.json();
+      const inactiveData = await inactiveRes.json();
+
+      const activeList = Array.isArray(activeData)
+        ? activeData.map(normalizeProductVariant)
+        : [];
+
+      const inactiveList = Array.isArray(inactiveData)
+        ? inactiveData.map(normalizeProductVariant)
+        : [];
+
+      foundProduct =
+        findVariantByCode(cleanCode, activeList) ||
+        findVariantByCode(cleanCode, inactiveList);
+
+      if (!foundProduct) {
+        setCodeSearchMessage("No se encontró ningún producto con ese código.");
+        setIsCodeSearching(false);
+        return;
+      }
+
+      const foundIsInactive =
+        String(foundProduct.Status || "Activo") === "Inactivo";
+
+      if (foundIsInactive) {
+        setViewMode("inactive");
+        setProducts(inactiveList.sort((a, b) => getVariantId(b) - getVariantId(a)));
+      } else {
+        setViewMode("active");
+        setProducts(activeList.sort((a, b) => getVariantId(b) - getVariantId(a)));
+      }
+
+      setCodeSearchMessage(
+        `✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`
+      );
+
+      editProduct(foundProduct);
+      setIsCodeSearching(false);
+    } catch (err) {
+      console.log("❌ Error buscando por código:", err);
+      setCodeSearchMessage(err.message || "Error buscando producto por código.");
+      setIsCodeSearching(false);
+    }
+  };
+
+  const releaseSearchCodeScanner = (
+    clearDelay = 1800
+  ) => {
+    setTimeout(() => {
+      codeScannerProcessingRef.current = false;
+    }, 1000);
+
+    setTimeout(() => {
+      setCodeSearchMessage("");
+    }, clearDelay);
+  };
+
+  const startSearchCodeScanner = async (cameraId = null) => {
+    if (isSearchCodeScannerStarting) return;
+
+    try {
+      setIsSearchCodeScannerStarting(true);
+
+      const reader = document.getElementById(
+        "products-admin-search-code-reader"
+      );
+
+      if (reader) {
+        reader.innerHTML = "";
+      }
+
+      await stopCodeScanner();
+
+      codeScannerProcessingRef.current = false;
+
+      const finalCameraId =
+        cameraId || selectedSearchScannerCameraId;
+
+      if (!finalCameraId) {
+        setCodeSearchMessage("No se encontró cámara seleccionada");
+        setIsSearchCodeScannerStarting(false);
+        return;
+      }
+
+      const scanner = new Html5Qrcode(
+        "products-admin-search-code-reader",
+        {
+          formatsToSupport: [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.DATA_MATRIX
+          ]
+        }
+      );
+
+      codeScannerRef.current = scanner;
+
+      const config = {
+        fps: 10,
+        qrbox: {
+          width: window.innerWidth < 768 ? 260 : 280,
+          height: window.innerWidth < 768 ? 180 : 180
+        },
+        aspectRatio: 1.333
+      };
+
+      await scanner.start(
+        finalCameraId,
+        config,
+        async (decodedText) => {
+          if (codeScannerProcessingRef.current) return;
+
+          codeScannerProcessingRef.current = true;
+
+          const cleanCode = String(decodedText || "").trim();
+
+          if (!cleanCode) {
+            codeScannerProcessingRef.current = false;
+            return;
+          }
+
+          const lowerCode = cleanCode.toLowerCase();
+
+          const looksLikeCustomerQR =
+            lowerCode.includes("/admin/sales/") ||
+            lowerCode.includes("/card/") ||
+            lowerCode.includes("/customer/");
+
+          if (looksLikeCustomerQR) {
+            setCodeSearchMessage(
+              "Este QR es de cliente. Aquí debes escanear un código de producto."
+            );
+
+            releaseSearchCodeScanner(2200);
+            return;
+          }
+
+          playScanSound();
+
+          setCodeSearch(cleanCode);
+          setCodeSearchMessage(`✅ Código leído: ${cleanCode}`);
+
+          await stopCodeScanner();
+
+          setShowSearchCodeScanner(false);
+
+          setTimeout(() => {
+            searchProductByCode(cleanCode);
+          }, 120);
+        },
+        () => {}
+      );
+
+      setIsSearchCodeScannerStarting(false);
+      setCodeSearchMessage("");
+    } catch (err) {
+      console.log("❌ Error startSearchCodeScanner:", err);
+
+      setIsSearchCodeScannerStarting(false);
+      codeScannerProcessingRef.current = false;
+
+      setCodeSearchMessage(
+        "No se pudo acceder a la cámara. Cierra otras pestañas que usen cámara o revisa permisos del navegador."
+      );
+    }
+  };
+
+  const openSearchCodeScanner = async () => {
+    try {
+      unlockScanSound();
+
+      await stopCodeScanner();
+
+      codeScannerProcessingRef.current = false;
+
+      setShowSearchCodeScanner(true);
+      setCodeSearchMessage("Cargando cámara...");
+
+      const cameras = await Html5Qrcode.getCameras();
+
+      if (!cameras || cameras.length === 0) {
+        setCodeSearchMessage("No se encontró cámara disponible");
+        return;
+      }
+
+      setSearchScannerCameras(cameras);
+
+      const preferredCamera = getPreferredScannerCamera(cameras);
+
+      if (!preferredCamera) {
+        setCodeSearchMessage("No se encontró cámara disponible");
+        return;
+      }
+
+      setSelectedSearchScannerCameraId(preferredCamera.id);
+
+      setTimeout(() => {
+        startSearchCodeScanner(preferredCamera.id);
+      }, 300);
+    } catch (err) {
+      console.log("❌ Error openSearchCodeScanner:", err);
+
+      codeScannerProcessingRef.current = false;
+
+      setCodeSearchMessage(
+        "No se pudo abrir el escáner. Revisa permisos o cierra otra pestaña que use cámara."
+      );
+    }
+  };
+
+  const changeSearchCodeScannerCamera = async (cameraId) => {
+    setSelectedSearchScannerCameraId(cameraId);
+    codeScannerProcessingRef.current = false;
+    setCodeSearchMessage("Cambiando cámara...");
+
+    await startSearchCodeScanner(cameraId);
+  };
+
+  const closeSearchCodeScanner = async () => {
+    await stopCodeScanner();
+
+    codeScannerProcessingRef.current = false;
+    setCodeSearchMessage("");
+    setShowSearchCodeScanner(false);
   };
 
   const getPowerLabel = (powerValue) => {
@@ -648,32 +1072,31 @@ function ProductsAdmin() {
     });
   };
 
-
   const findExistingBaseProductOnServer = async (productPayload) => {
-  const response = await fetch(`${API_URL}/api/products/find-base`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      Category: productPayload.Category,
-      Marca: productPayload.Marca,
-      Modelo: productPayload.Modelo
-    })
-  });
+    const response = await fetch(`${API_URL}/api/products/find-base`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        Category: productPayload.Category,
+        Marca: productPayload.Marca,
+        Modelo: productPayload.Modelo
+      })
+    });
 
-  const data = await response.json();
+    const data = await response.json();
 
-  if (!response.ok) {
-    throw new Error(
-      data.sqlMessage ||
-      data.message ||
-      "No se pudo buscar el producto base"
-    );
-  }
+    if (!response.ok) {
+      throw new Error(
+        data.sqlMessage ||
+        data.message ||
+        "No se pudo buscar el producto base"
+      );
+    }
 
-  return data;
-};
+    return data;
+  };
 
   const productVariantAlreadyExists = () => {
     const cleanCategory = normalizeText(formData.Category);
@@ -702,235 +1125,211 @@ function ProductsAdmin() {
     });
   };
 
- const saveProduct = async () => {
-  if (isSaving) return;
+  const saveProduct = async () => {
+    if (isSaving) return;
 
-  try {
-    setIsSaving(true);
+    try {
+      setIsSaving(true);
 
-    if (!validateForm()) {
-      setIsSaving(false);
-      return;
-    }
+      if (!validateForm()) {
+        setIsSaving(false);
+        return;
+      }
 
-    if (productVariantAlreadyExists()) {
-      alert(
-        "Ya existe una variante con la misma marca, categoría, producto, color y graduación."
-      );
+      if (productVariantAlreadyExists()) {
+        alert(
+          "Ya existe una variante con la misma marca, categoría, producto, color y graduación."
+        );
 
-      setIsSaving(false);
-      return;
-    }
+        setIsSaving(false);
+        return;
+      }
 
-    const imageUrl = await uploadImageIfNeeded();
+      const imageUrl = await uploadImageIfNeeded();
 
-    const productPayload = {
-      SKU: formData.SKU || "",
-      Category: String(formData.Category || "").trim(),
-      Marca: String(formData.Marca || "").trim(),
-      Modelo: String(formData.Modelo || "").trim(),
-      Description: formData.Description || "",
-      Image: imageUrl || "",
-      Image2: formData.Image2 || "",
-      Image3: formData.Image3 || ""
-    };
+      const productPayload = {
+        SKU: formData.SKU || "",
+        Category: String(formData.Category || "").trim(),
+        Marca: String(formData.Marca || "").trim(),
+        Modelo: String(formData.Modelo || "").trim(),
+        Description: formData.Description || "",
+        Image: imageUrl || "",
+        Image2: formData.Image2 || "",
+        Image3: formData.Image3 || ""
+      };
 
-    let productId = editingProductId;
+      let productId = editingProductId;
 
-   const serverBaseProduct =
-  await findExistingBaseProductOnServer(productPayload);
+      const serverBaseProduct =
+        await findExistingBaseProductOnServer(productPayload);
 
-const existingBaseProductId =
-  serverBaseProduct?.found && serverBaseProduct?.ProductId
-    ? serverBaseProduct.ProductId
-    : null;
+      const existingBaseProductId =
+        serverBaseProduct?.found && serverBaseProduct?.ProductId
+          ? serverBaseProduct.ProductId
+          : null;
 
-    /*
-      CASO 1:
-      Estoy editando una variante y el producto base destino YA existe.
-      Ejemplo:
-      Natural + Urban Layer + Breeze gray ya existe.
+      if (
+        editingVariantId &&
+        existingBaseProductId &&
+        String(existingBaseProductId) !== String(editingProductId)
+      ) {
+        productId = existingBaseProductId;
+      }
 
-      Entonces NO actualizamos Products porque daría duplicate.
-      Solo movemos la variante a ese ProductId existente.
-    */
-    if (
-      editingVariantId &&
-      existingBaseProductId &&
-      String(existingBaseProductId) !== String(editingProductId)
-    ) {
-      productId = existingBaseProductId;
-    }
+      if (!editingVariantId && existingBaseProductId) {
+        productId = existingBaseProductId;
+      }
 
-    /*
-      CASO 2:
-      Estoy creando variante nueva y ya existe el producto base.
-      Usamos ese ProductId.
-    */
-    if (!editingVariantId && existingBaseProductId) {
-      productId = existingBaseProductId;
-    }
+      if (
+        editingVariantId &&
+        editingProductId &&
+        (
+          !existingBaseProductId ||
+          String(existingBaseProductId) === String(editingProductId)
+        )
+      ) {
+        const productResponse = await fetch(
+          `${API_URL}/api/products/${editingProductId}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              ...productPayload,
+              Status: "Activo"
+            })
+          }
+        );
 
-    /*
-      CASO 3:
-      Estoy editando variante, pero NO existe otro producto base igual.
-      Aquí sí actualizamos el producto base actual.
-    */
-    if (
-      editingVariantId &&
-      editingProductId &&
-      (
-        !existingBaseProductId ||
-        String(existingBaseProductId) === String(editingProductId)
-      )
-    ) {
-      const productResponse = await fetch(
-        `${API_URL}/api/products/${editingProductId}`,
-        {
-          method: "PUT",
+        const productData = await productResponse.json();
+
+        if (!productResponse.ok) {
+          alert(
+            productData.sqlMessage ||
+              productData.message ||
+              "No se pudo actualizar el producto base"
+          );
+
+          setIsSaving(false);
+          return;
+        }
+
+        productId = editingProductId;
+      }
+
+      if (!editingVariantId && !productId) {
+        const productResponse = await fetch(`${API_URL}/api/products`, {
+          method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify({
-            ...productPayload,
-            Status: "Activo"
-          })
+          body: JSON.stringify(productPayload)
+        });
+
+        const productData = await productResponse.json();
+
+        if (!productResponse.ok) {
+          alert(
+            productData.sqlMessage ||
+              productData.message ||
+              "No se pudo crear el producto base"
+          );
+
+          setIsSaving(false);
+          return;
         }
-      );
 
-      const productData = await productResponse.json();
+        productId = productData.ProductId;
+      }
 
-      if (!productResponse.ok) {
-        alert(
-          productData.sqlMessage ||
-            productData.message ||
-            "No se pudo actualizar el producto base"
-        );
-
+      if (!productId) {
+        alert("No se pudo obtener el ProductId");
         setIsSaving(false);
         return;
       }
 
-      productId = editingProductId;
-    }
+      const cleanPower = Number(formData.Power || 0);
 
-    /*
-      CASO 4:
-      Estoy creando producto/variante y no existe producto base.
-      Creamos Products primero.
-    */
-    if (!editingVariantId && !productId) {
-      const productResponse = await fetch(`${API_URL}/api/products`, {
-        method: "POST",
+      const cleanPowerLabel =
+        cleanPower === 0
+          ? "Sin graduación"
+          : formData.PowerLabel || cleanPower.toFixed(2);
+
+      const isInternal = formData.CodeMode === "INTERNAL";
+
+      const factoryCode = isInternal
+        ? ""
+        : String(formData.FactoryCode || "").trim();
+
+      const internalCode = isInternal
+        ? String(formData.InternalCode || "").trim()
+        : "";
+
+      const scanCode = isInternal ? internalCode : factoryCode;
+
+      const cleanStock = Number(formData.Stock || 0);
+
+      const variantPayload = {
+        ProductId: productId,
+        Color: String(formData.Color || "").trim(),
+        Power: cleanPower,
+        PowerLabel: cleanPowerLabel,
+        Price: Number(formData.Price || 0),
+        Stock: cleanStock,
+        FactoryCode: factoryCode,
+        InternalCode: internalCode,
+        ScanCode: scanCode,
+        CodeType: isInternal ? "INTERNAL" : formData.CodeType || "BARCODE",
+        Status: cleanStock <= 0 ? "Inactivo" : "Activo"
+      };
+
+      const variantUrl = editingVariantId
+        ? `${API_URL}/api/product-variants/${editingVariantId}`
+        : `${API_URL}/api/product-variants`;
+
+      const variantMethod = editingVariantId ? "PUT" : "POST";
+
+      const variantResponse = await fetch(variantUrl, {
+        method: variantMethod,
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(productPayload)
+        body: JSON.stringify(variantPayload)
       });
 
-      const productData = await productResponse.json();
+      const variantData = await variantResponse.json();
 
-      if (!productResponse.ok) {
+      if (!variantResponse.ok) {
         alert(
-          productData.sqlMessage ||
-            productData.message ||
-            "No se pudo crear el producto base"
+          variantData.sqlMessage ||
+            variantData.message ||
+            "No se pudo guardar la variante"
         );
 
         setIsSaving(false);
         return;
       }
 
-      productId = productData.ProductId;
-    }
+      await loadProducts();
 
-    if (!productId) {
-      alert("No se pudo obtener el ProductId");
-      setIsSaving(false);
-      return;
-    }
+      resetForm();
+      setShowForm(false);
+      setCurrentPage(1);
 
-    const cleanPower = Number(formData.Power || 0);
-
-    const cleanPowerLabel =
-      cleanPower === 0
-        ? "Sin graduación"
-        : formData.PowerLabel || cleanPower.toFixed(2);
-
-    const isInternal = formData.CodeMode === "INTERNAL";
-
-    const factoryCode = isInternal
-      ? ""
-      : String(formData.FactoryCode || "").trim();
-
-    const internalCode = isInternal
-      ? String(formData.InternalCode || "").trim()
-      : "";
-
-    const scanCode = isInternal ? internalCode : factoryCode;
-
-    const cleanStock = Number(formData.Stock || 0);
-
-    const variantPayload = {
-      ProductId: productId,
-      Color: String(formData.Color || "").trim(),
-      Power: cleanPower,
-      PowerLabel: cleanPowerLabel,
-      Price: Number(formData.Price || 0),
-      Stock: cleanStock,
-      FactoryCode: factoryCode,
-      InternalCode: internalCode,
-      ScanCode: scanCode,
-      CodeType: isInternal ? "INTERNAL" : formData.CodeType || "BARCODE",
-      Status: cleanStock <= 0 ? "Inactivo" : "Activo"
-    };
-
-    const variantUrl = editingVariantId
-      ? `${API_URL}/api/product-variants/${editingVariantId}`
-      : `${API_URL}/api/product-variants`;
-
-    const variantMethod = editingVariantId ? "PUT" : "POST";
-
-    const variantResponse = await fetch(variantUrl, {
-      method: variantMethod,
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(variantPayload)
-    });
-
-    const variantData = await variantResponse.json();
-
-    if (!variantResponse.ok) {
       alert(
-        variantData.sqlMessage ||
-          variantData.message ||
-          "No se pudo guardar la variante"
+        editingVariantId
+          ? "✅ Variante actualizada"
+          : "✅ Variante creada correctamente"
       );
 
       setIsSaving(false);
-      return;
+    } catch (err) {
+      console.log("❌ Error save product:", err);
+      alert(err.message || "Error al guardar producto");
+      setIsSaving(false);
     }
-
-    await loadProducts();
-
-    resetForm();
-    setShowForm(false);
-    setCurrentPage(1);
-
-    alert(
-      editingVariantId
-        ? "✅ Variante actualizada"
-        : "✅ Variante creada correctamente"
-    );
-
-    setIsSaving(false);
-  } catch (err) {
-    console.log("❌ Error save product:", err);
-    alert(err.message || "Error al guardar producto");
-    setIsSaving(false);
-  }
-};
+  };
 
   const editProduct = (product) => {
     const variantId = product.ProductVariantId || product.Id;
@@ -977,7 +1376,9 @@ const existingBaseProductId =
     setShowForm(true);
   };
 
-  const openGalleryForm = (product) => {
+  const openGalleryForm = async (product) => {
+    await stopCodeScanner();
+
     setSelectedGalleryProduct(product);
 
     setGalleryForm({
@@ -1129,6 +1530,7 @@ const existingBaseProductId =
     } finally {
       codeScannerProcessingRef.current = false;
       setIsCodeScannerStarting(false);
+      setIsSearchCodeScannerStarting(false);
     }
   };
 
@@ -1575,6 +1977,128 @@ const existingBaseProductId =
           </button>
         </div>
 
+        <div className="products-code-search-panel">
+          <div>
+            <h3>Buscar por código</h3>
+
+            <p>
+              Escanea o escribe el código de barras, QR, código interno o código de fábrica.
+              Al encontrarlo se abrirá el modal de editar variante.
+            </p>
+          </div>
+
+          <div className="products-code-search-row">
+            <div className="products-code-search-input">
+              <Search size={18} />
+
+              <input
+                type="text"
+                placeholder="Código del producto..."
+                value={codeSearch}
+                onChange={(e) => {
+                  setCodeSearch(e.target.value);
+                  setCodeSearchMessage("");
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    searchProductByCode();
+                  }
+                }}
+              />
+
+              {codeSearch && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCodeSearch("");
+                    setCodeSearchMessage("");
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="admin-save-btn products-scan-code-btn"
+              onClick={openSearchCodeScanner}
+            >
+              📷 Escanear
+            </button>
+
+            <button
+              type="button"
+              className="admin-save-btn"
+              onClick={() => searchProductByCode()}
+              disabled={isCodeSearching}
+            >
+              {isCodeSearching
+                ? "Buscando..."
+                : "Buscar y editar"}
+            </button>
+          </div>
+
+          {codeSearchMessage && (
+            <div className="products-code-search-message">
+              {codeSearchMessage}
+            </div>
+          )}
+
+          {showSearchCodeScanner && (
+            <div className="product-code-scanner-card products-search-scanner-card">
+              <div className="admin-form-header">
+                <h3>Escanear código para editar</h3>
+
+                <button
+                  type="button"
+                  className="admin-close-btn"
+                  onClick={closeSearchCodeScanner}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {searchScannerCameras.length > 1 && (
+                <div className="camera-select-box">
+                  <label>Cámara</label>
+
+                  <select
+                    value={selectedSearchScannerCameraId}
+                    onChange={(e) =>
+                      changeSearchCodeScannerCamera(e.target.value)
+                    }
+                  >
+                    {searchScannerCameras.map((camera, index) => (
+                      <option key={camera.id} value={camera.id}>
+                        {camera.label || `Cámara ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div
+                id="products-admin-search-code-reader"
+                className="qr-reader"
+              ></div>
+
+              <button
+                type="button"
+                className="admin-save-btn"
+                onClick={() =>
+                  startSearchCodeScanner(selectedSearchScannerCameraId)
+                }
+                disabled={isSearchCodeScannerStarting}
+              >
+                {isSearchCodeScannerStarting
+                  ? "Iniciando cámara..."
+                  : "Reiniciar cámara"}
+              </button>
+            </div>
+          )}
+        </div>
+
         {showForm && (
           <div
             className="product-admin-modal-overlay"
@@ -1586,397 +2110,405 @@ const existingBaseProductId =
               className="admin-form-card product-admin-modal-card"
               onClick={(e) => e.stopPropagation()}
             >
-            <div className="admin-form-header">
-              <h2>
-                {editingVariantId
-                  ? "Editar Variante"
-                  : "Nuevo Producto + Variante"}
-              </h2>
+              <div className="admin-form-header">
+                <h2>
+                  {editingVariantId
+                    ? "Editar Variante"
+                    : "Nuevo Producto + Variante"}
+                </h2>
 
-              <button
-                className="admin-close-btn"
-                onClick={() => {
-                  void closeProductForm();
-                }}
-              >
-                ✕
-              </button>
-            </div>
+                <button
+                  className="admin-close-btn"
+                  onClick={() => {
+                    void closeProductForm();
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
 
-            <h3 className="product-form-section-title">
-              Producto base
-            </h3>
+              <h3 className="product-form-section-title">
+                Producto base
+              </h3>
 
-            <div className="admin-form-grid">
-              <select
-                name="Category"
-                value={formData.Category}
-                onChange={handleChange}
-              >
-                <option value="">Seleccionar categoría</option>
+              <div className="admin-form-grid">
+                <select
+                  name="Category"
+                  value={formData.Category}
+                  onChange={handleChange}
+                >
+                  <option value="">Seleccionar categoría</option>
 
-                {categories.map((category) => (
-                  <option key={category.Id} value={category.Name}>
-                    {category.Name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                name="Marca"
-                value={formData.Marca}
-                onChange={handleChange}
-              >
-                <option value="">Seleccionar marca</option>
-
-                {brands.map((brand) => (
-                  <option key={brand.Id} value={brand.Name}>
-                    {brand.Name}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="text"
-                name="Modelo"
-                placeholder="Producto / modelo"
-                value={formData.Modelo}
-                onChange={handleChange}
-              />
-
-              <input
-                type="number"
-                name="Price"
-                placeholder="Precio"
-                value={formData.Price}
-                onChange={handleChange}
-              />
-
-              <input
-                type="number"
-                name="Stock"
-                placeholder="Stock"
-                value={formData.Stock}
-                onChange={handleChange}
-              />
-
-              <input
-                type="file"
-                onChange={handleImage}
-              />
-
-              {formData.Image && (
-                <div className="product-form-preview">
-                  <img
-                    src={getImageUrl(formData.Image)}
-                    alt={formData.Modelo}
-                  />
-                </div>
-              )}
-            </div>
-
-            <h3 className="product-form-section-title">
-              Variante vendible
-            </h3>
-
-            <div className="admin-form-grid">
-              <select
-                name="Color"
-                value={formData.Color}
-                onChange={handleChange}
-              >
-                <option value="">Seleccionar color</option>
-
-                {colors.map((color) => (
-                  <option key={color.Id} value={color.Name}>
-                    {color.Name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                name="Power"
-                value={formData.Power}
-                onChange={handleChange}
-              >
-                {powers.map((power) => (
-                  <option
-                    key={power.Id}
-                    value={Number(power.Power).toFixed(2)}
-                  >
-                    {power.PowerLabel}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <h3 className="product-form-section-title">
-              Código escaneable
-            </h3>
-
-            <div className="admin-form-grid">
-              <select
-                name="CodeMode"
-                value={formData.CodeMode}
-                onChange={handleChange}
-              >
-                <option value="FACTORY">
-                  Usar código de fábrica
-                </option>
-
-                <option value="INTERNAL">
-                  Generar código interno
-                </option>
-              </select>
-
-              {formData.CodeMode === "FACTORY" && (
-                <>
-                  <select
-                    name="CodeType"
-                    value={formData.CodeType}
-                    onChange={handleChange}
-                  >
-                    <option value="BARCODE">
-                      Código de barras
+                  {categories.map((category) => (
+                    <option key={category.Id} value={category.Name}>
+                      {category.Name}
                     </option>
+                  ))}
+                </select>
 
-                    <option value="QR">
-                      QR de fábrica
+                <select
+                  name="Marca"
+                  value={formData.Marca}
+                  onChange={handleChange}
+                >
+                  <option value="">Seleccionar marca</option>
+
+                  {brands.map((brand) => (
+                    <option key={brand.Id} value={brand.Name}>
+                      {brand.Name}
                     </option>
-                  </select>
+                  ))}
+                </select>
 
-                  <div className="factory-code-row">
-                    <input
-                      type="text"
-                      name="FactoryCode"
-                      placeholder="Escanea o escribe el código de la caja"
-                      value={formData.FactoryCode}
-                      onChange={handleChange}
+                <input
+                  type="text"
+                  name="Modelo"
+                  placeholder="Producto / modelo"
+                  value={formData.Modelo}
+                  onChange={handleChange}
+                />
+
+                <input
+                  type="number"
+                  name="Price"
+                  placeholder="Precio"
+                  value={formData.Price}
+                  onChange={handleChange}
+                />
+
+                <input
+                  type="number"
+                  name="Stock"
+                  placeholder="Stock"
+                  value={formData.Stock}
+                  onChange={handleChange}
+                />
+
+                <input
+                  type="file"
+                  onChange={handleImage}
+                />
+
+                {formData.Image && (
+                  <div className="product-form-preview">
+                    <img
+                      src={getImageUrl(formData.Image)}
+                      alt={formData.Modelo}
                     />
+                  </div>
+                )}
+              </div>
+
+              <h3 className="product-form-section-title">
+                Variante vendible
+              </h3>
+
+              <div className="admin-form-grid">
+                <select
+                  name="Color"
+                  value={formData.Color}
+                  onChange={handleChange}
+                >
+                  <option value="">Seleccionar color</option>
+
+                  {colors.map((color) => (
+                    <option key={color.Id} value={color.Name}>
+                      {color.Name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  name="Power"
+                  value={formData.Power}
+                  onChange={handleChange}
+                >
+                  {powers.map((power) => (
+                    <option
+                      key={power.Id}
+                      value={Number(power.Power).toFixed(2)}
+                    >
+                      {power.PowerLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <h3 className="product-form-section-title">
+                Código escaneable
+              </h3>
+
+              <div className="admin-form-grid">
+                <select
+                  name="CodeMode"
+                  value={formData.CodeMode}
+                  onChange={handleChange}
+                >
+                  <option value="FACTORY">
+                    Usar código de fábrica
+                  </option>
+
+                  <option value="INTERNAL">
+                    Generar código interno
+                  </option>
+                </select>
+
+                {formData.CodeMode === "FACTORY" && (
+                  <>
+                    <select
+                      name="CodeType"
+                      value={formData.CodeType}
+                      onChange={handleChange}
+                    >
+                      <option value="BARCODE">
+                        Código de barras
+                      </option>
+
+                      <option value="QR">
+                        QR de fábrica
+                      </option>
+                    </select>
+
+                    <div className="factory-code-row">
+                      <input
+                        type="text"
+                        name="FactoryCode"
+                        placeholder="Escanea o escribe el código de la caja"
+                        value={formData.FactoryCode}
+                        onChange={handleChange}
+                      />
+
+                      <button
+                        type="button"
+                        className="admin-save-btn"
+                        onClick={openCodeScanner}
+                      >
+                        📷 Escanear
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {formData.CodeMode === "INTERNAL" && (
+                  <div className="sales-product-empty">
+                    El sistema generará un código interno automáticamente al guardar.
+                  </div>
+                )}
+
+                {formData.ScanCode && (
+                  <input
+                    type="text"
+                    name="ScanCode"
+                    placeholder="Código escaneable"
+                    value={formData.ScanCode}
+                    readOnly
+                  />
+                )}
+
+                {showCodeScanner && (
+                  <div className="product-code-scanner-card">
+                    <div className="admin-form-header">
+                      <h3>Escanear código de producto</h3>
+
+                      <button
+                        type="button"
+                        className="admin-close-btn"
+                        onClick={closeCodeScanner}
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {scannerCameras.length > 1 && (
+                      <div className="camera-select-box">
+                        <label>Cámara</label>
+
+                        <select
+                          value={selectedScannerCameraId}
+                          onChange={(e) =>
+                            changeCodeScannerCamera(e.target.value)
+                          }
+                        >
+                          {scannerCameras.map((camera, index) => (
+                            <option key={camera.id} value={camera.id}>
+                              {camera.label || `Cámara ${index + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div
+                      id="product-code-reader"
+                      className="qr-reader"
+                    ></div>
+
+                    {scannerMessage && (
+                      <div className="scanner-message">
+                        {scannerMessage}
+                      </div>
+                    )}
 
                     <button
                       type="button"
                       className="admin-save-btn"
-                      onClick={openCodeScanner}
+                      onClick={() =>
+                        startCodeScanner(selectedScannerCameraId)
+                      }
+                      disabled={isCodeScannerStarting}
                     >
-                      📷 Escanear
+                      {isCodeScannerStarting
+                        ? "Iniciando cámara..."
+                        : "Reiniciar cámara"}
                     </button>
                   </div>
-                </>
-              )}
+                )}
 
-              {formData.CodeMode === "INTERNAL" && (
-                <div className="sales-product-empty">
-                  El sistema generará un código interno automáticamente al guardar.
-                </div>
-              )}
-
-              {formData.ScanCode && (
-                <input
-                  type="text"
-                  name="ScanCode"
-                  placeholder="Código escaneable"
-                  value={formData.ScanCode}
-                  readOnly
-                />
-              )}
-
-              {showCodeScanner && (
-                <div className="product-code-scanner-card">
-                  <div className="admin-form-header">
-                    <h3>Escanear código de producto</h3>
-
-                    <button
-                      type="button"
-                      className="admin-close-btn"
-                      onClick={closeCodeScanner}
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  {scannerCameras.length > 1 && (
-                    <div className="camera-select-box">
-                      <label>Cámara</label>
-
-                      <select
-                        value={selectedScannerCameraId}
-                        onChange={(e) =>
-                          changeCodeScannerCamera(e.target.value)
-                        }
-                      >
-                        {scannerCameras.map((camera, index) => (
-                          <option key={camera.id} value={camera.id}>
-                            {camera.label || `Cámara ${index + 1}`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  <div
-                    id="product-code-reader"
-                    className="qr-reader"
-                  ></div>
-
-                  {scannerMessage && (
-                    <div className="scanner-message">
-                      {scannerMessage}
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    className="admin-save-btn"
-                    onClick={() =>
-                      startCodeScanner(selectedScannerCameraId)
-                    }
-                    disabled={isCodeScannerStarting}
-                  >
-                    {isCodeScannerStarting
-                      ? "Iniciando cámara..."
-                      : "Reiniciar cámara"}
-                  </button>
-                </div>
-              )}
-
-              <button
-                className="admin-save-btn"
-                onClick={saveProduct}
-                disabled={isSaving}
-              >
-                {isSaving
-                  ? "Guardando..."
-                  : editingVariantId
-                    ? "Actualizar"
-                    : "Guardar"}
-              </button>
+                <button
+                  className="admin-save-btn"
+                  onClick={saveProduct}
+                  disabled={isSaving}
+                >
+                  {isSaving
+                    ? "Guardando..."
+                    : editingVariantId
+                      ? "Actualizar"
+                      : "Guardar"}
+                </button>
+              </div>
             </div>
-          </div>
           </div>
         )}
 
         {showGalleryForm && selectedGalleryProduct && (
-          <div className="admin-form-card product-gallery-card">
-            <div className="admin-form-header">
-              <div>
-                <h2>Fotos del producto</h2>
+          <div
+            className="product-admin-modal-overlay"
+            onClick={closeGalleryForm}
+          >
+            <div
+              className="admin-form-card product-admin-modal-card product-gallery-modal-card"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="admin-form-header">
+                <div>
+                  <h2>Fotos del producto</h2>
 
-                <p>
-                  {selectedGalleryProduct.Marca}{" "}
-                  {selectedGalleryProduct.Modelo}
-                </p>
+                  <p>
+                    {selectedGalleryProduct.Marca}{" "}
+                    {selectedGalleryProduct.Modelo}
+                  </p>
+                </div>
+
+                <button
+                  className="admin-close-btn"
+                  onClick={closeGalleryForm}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="product-gallery-grid">
+                <div className="product-gallery-item">
+                  <label>Imagen principal</label>
+
+                  {galleryForm.Image ? (
+                    <img
+                      src={getImageUrl(galleryForm.Image)}
+                      alt="Imagen principal"
+                    />
+                  ) : (
+                    <div className="product-gallery-placeholder">
+                      Sin imagen
+                    </div>
+                  )}
+
+                  <input
+                    type="file"
+                    onChange={(e) =>
+                      handleGalleryFile("Image", e.target.files[0])
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    className="gallery-remove-btn"
+                    onClick={() => removeGalleryImage("Image")}
+                  >
+                    Quitar
+                  </button>
+                </div>
+
+                <div className="product-gallery-item">
+                  <label>Imagen 2</label>
+
+                  {galleryForm.Image2 ? (
+                    <img
+                      src={getImageUrl(galleryForm.Image2)}
+                      alt="Imagen 2"
+                    />
+                  ) : (
+                    <div className="product-gallery-placeholder">
+                      Sin imagen
+                    </div>
+                  )}
+
+                  <input
+                    type="file"
+                    onChange={(e) =>
+                      handleGalleryFile("Image2", e.target.files[0])
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    className="gallery-remove-btn"
+                    onClick={() => removeGalleryImage("Image2")}
+                  >
+                    Quitar
+                  </button>
+                </div>
+
+                <div className="product-gallery-item">
+                  <label>Imagen 3</label>
+
+                  {galleryForm.Image3 ? (
+                    <img
+                      src={getImageUrl(galleryForm.Image3)}
+                      alt="Imagen 3"
+                    />
+                  ) : (
+                    <div className="product-gallery-placeholder">
+                      Sin imagen
+                    </div>
+                  )}
+
+                  <input
+                    type="file"
+                    onChange={(e) =>
+                      handleGalleryFile("Image3", e.target.files[0])
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    className="gallery-remove-btn"
+                    onClick={() => removeGalleryImage("Image3")}
+                  >
+                    Quitar
+                  </button>
+                </div>
               </div>
 
               <button
-                className="admin-close-btn"
-                onClick={closeGalleryForm}
+                className="admin-save-btn"
+                onClick={saveGalleryImages}
+                disabled={isGallerySaving}
               >
-                ✕
+                {isGallerySaving
+                  ? "Guardando fotos..."
+                  : "Guardar fotos"}
               </button>
             </div>
-
-            <div className="product-gallery-grid">
-              <div className="product-gallery-item">
-                <label>Imagen principal</label>
-
-                {galleryForm.Image ? (
-                  <img
-                    src={getImageUrl(galleryForm.Image)}
-                    alt="Imagen principal"
-                  />
-                ) : (
-                  <div className="product-gallery-placeholder">
-                    Sin imagen
-                  </div>
-                )}
-
-                <input
-                  type="file"
-                  onChange={(e) =>
-                    handleGalleryFile("Image", e.target.files[0])
-                  }
-                />
-
-                <button
-                  type="button"
-                  className="gallery-remove-btn"
-                  onClick={() => removeGalleryImage("Image")}
-                >
-                  Quitar
-                </button>
-              </div>
-
-              <div className="product-gallery-item">
-                <label>Imagen 2</label>
-
-                {galleryForm.Image2 ? (
-                  <img
-                    src={getImageUrl(galleryForm.Image2)}
-                    alt="Imagen 2"
-                  />
-                ) : (
-                  <div className="product-gallery-placeholder">
-                    Sin imagen
-                  </div>
-                )}
-
-                <input
-                  type="file"
-                  onChange={(e) =>
-                    handleGalleryFile("Image2", e.target.files[0])
-                  }
-                />
-
-                <button
-                  type="button"
-                  className="gallery-remove-btn"
-                  onClick={() => removeGalleryImage("Image2")}
-                >
-                  Quitar
-                </button>
-              </div>
-
-              <div className="product-gallery-item">
-                <label>Imagen 3</label>
-
-                {galleryForm.Image3 ? (
-                  <img
-                    src={getImageUrl(galleryForm.Image3)}
-                    alt="Imagen 3"
-                  />
-                ) : (
-                  <div className="product-gallery-placeholder">
-                    Sin imagen
-                  </div>
-                )}
-
-                <input
-                  type="file"
-                  onChange={(e) =>
-                    handleGalleryFile("Image3", e.target.files[0])
-                  }
-                />
-
-                <button
-                  type="button"
-                  className="gallery-remove-btn"
-                  onClick={() => removeGalleryImage("Image3")}
-                >
-                  Quitar
-                </button>
-              </div>
-            </div>
-
-            <button
-              className="admin-save-btn"
-              onClick={saveGalleryImages}
-              disabled={isGallerySaving}
-            >
-              {isGallerySaving
-                ? "Guardando fotos..."
-                : "Guardar fotos"}
-            </button>
           </div>
         )}
 
