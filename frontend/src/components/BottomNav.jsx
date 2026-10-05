@@ -67,10 +67,10 @@ function BottomNav() {
       </Link>
 
       <Link
-        to="/profile"
+        to="/admin/login"
 
         className={
-          location.pathname === "/profile"
+          location.pathname === "/admin/login"
             ? "nav-item active"
             : "nav-item"
         }
@@ -78,7 +78,7 @@ function BottomNav() {
 
         <User size={22} />
 
-        <span>Perfil</span>
+        <span>Admin</span>
 
       </Link>
 

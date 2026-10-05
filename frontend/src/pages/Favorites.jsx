@@ -224,7 +224,7 @@ Precio: ${formatPrice(product.Price)}`;
   }, [favorites]);
 
   return (
-    <div className="app">
+    <div className="app cl-storefront">
       <Navbar setIsOpen={setIsSidebarOpen} />
 
       <Sidebar

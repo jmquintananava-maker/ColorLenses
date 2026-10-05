@@ -1,3 +1,4 @@
+import { apiFetch as fetch } from "../../utils/api";
 import { useEffect, useRef, useState } from "react";
 
 import { useParams } from "react-router-dom";
@@ -10,10 +11,7 @@ import {
   Search
 } from "lucide-react";
 
-import {
-  Html5Qrcode,
-  Html5QrcodeSupportedFormats
-} from "html5-qrcode";
+import SaleProductScanner from "../../components/sales/SaleProductScanner";
 
 import AdminSidebar from "../../components/AdminSidebar";
 
@@ -22,7 +20,7 @@ import generateTicket from "../../utils/generateTicket";
 import sendWhatsApp from "../../utils/sendWhatsApp";
 
 const API_URL =
-  import.meta.env.VITE_API_URL;
+  (import.meta.env.VITE_API_URL || "");
 
 function SalesAdmin() {
   const { slug } =
@@ -62,12 +60,6 @@ function SalesAdmin() {
   const [scannerMessage, setScannerMessage] =
     useState("");
 
-  const [productCameras, setProductCameras] =
-    useState([]);
-
-  const [selectedProductCameraId, setSelectedProductCameraId] =
-    useState("");
-
   const [customerHistory, setCustomerHistory] =
     useState([]);
 
@@ -77,11 +69,22 @@ function SalesAdmin() {
   const [isSaving, setIsSaving] =
     useState(false);
 
-  const productScannerRef =
-    useRef(null);
+  const productSectionRef = useRef(null);
+  const productSearchRef = useRef(null);
+  const scanButtonRef = useRef(null);
 
-  const productScanProcessingRef =
-    useRef(false);
+  const returnToProducts = () => {
+    // Run after the native dialog releases its focus trap.
+    requestAnimationFrame(() => {
+      const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      productSectionRef.current?.scrollIntoView({behavior:reduced?'auto':'smooth',block:'start'});
+      productSearchRef.current?.focus({preventScroll:true});
+    });
+  };
+  const closeProductScanner = () => {
+    setShowProductScanner(false);
+    returnToProducts();
+  };
 
   /* =========================
      SCAN SOUND
@@ -128,6 +131,7 @@ function SalesAdmin() {
       gainNode.connect(audioContext.destination);
 
       oscillator.start(audioContext.currentTime);
+      oscillator.onended = () => audioContext.close().catch(() => {});
       oscillator.stop(audioContext.currentTime + 0.2);
 
       if (navigator.vibrate) {
@@ -165,306 +169,6 @@ function SalesAdmin() {
 
     setRedeemedPoints(0);
   }, [selectedCustomer]);
-
-  /* =========================
-     PRODUCT SCANNER
-  ========================= */
-
-  useEffect(() => {
-    if (!showProductScanner) return;
-
-    loadProductCamerasAndStart();
-
-    return () => {
-      stopProductScanner();
-    };
-  }, [showProductScanner]);
-
-  const getPreferredBackCamera = (availableCameras) => {
-    if (!availableCameras || availableCameras.length === 0) {
-      return null;
-    }
-
-    const normalizedCameras = availableCameras.map((camera) => ({
-      ...camera,
-      cleanLabel: String(camera.label || "").toLowerCase()
-    }));
-
-    const ultraWideCamera =
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("ultra")
-      ) ||
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("gran angular")
-      ) ||
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("wide")
-      ) ||
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("dual")
-      );
-
-    if (ultraWideCamera) {
-      return ultraWideCamera;
-    }
-
-    const backCamera =
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("back")
-      ) ||
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("rear")
-      ) ||
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("environment")
-      ) ||
-      normalizedCameras.find((camera) =>
-        camera.cleanLabel.includes("trasera")
-      );
-
-    if (backCamera) {
-      return backCamera;
-    }
-
-    return availableCameras[availableCameras.length - 1];
-  };
-
-  const loadProductCamerasAndStart = async () => {
-    try {
-      productScanProcessingRef.current = false;
-
-      const availableCameras =
-        await Html5Qrcode.getCameras();
-
-      if (
-        !availableCameras ||
-        availableCameras.length === 0
-      ) {
-        setScannerMessage(
-          "No se encontró cámara disponible"
-        );
-
-        return;
-      }
-
-      setProductCameras(availableCameras);
-
-      const preferredCamera =
-        getPreferredBackCamera(availableCameras);
-
-      if (!preferredCamera) {
-        setScannerMessage(
-          "No se encontró cámara disponible"
-        );
-
-        return;
-      }
-
-      setSelectedProductCameraId(
-        preferredCamera.id
-      );
-
-      await startProductScanner(
-        preferredCamera.id
-      );
-    } catch (err) {
-      console.log(
-        "❌ Error cargando cámaras producto:",
-        err
-      );
-
-      setScannerMessage(
-        "No se pudo acceder a la cámara. Revisa permisos del navegador."
-      );
-    }
-  };
-
-  const stopProductScanner = async () => {
-    try {
-      if (productScannerRef.current) {
-        const scanner = productScannerRef.current;
-
-        productScannerRef.current = null;
-
-        await scanner
-          .stop()
-          .catch(() => {});
-
-        scanner.clear();
-      }
-    } catch (err) {
-      console.log(
-        "Scanner producto ya estaba detenido:",
-        err
-      );
-    } finally {
-      productScanProcessingRef.current = false;
-    }
-  };
-
-  const startProductScanner = async (
-    cameraId = null
-  ) => {
-    try {
-      const reader =
-        document.getElementById(
-          "product-reader"
-        );
-
-      if (reader) {
-        reader.innerHTML = "";
-      }
-
-      await stopProductScanner();
-
-      productScanProcessingRef.current = false;
-
-      const scanner =
-        new Html5Qrcode(
-          "product-reader",
-          {
-            formatsToSupport: [
-              Html5QrcodeSupportedFormats.QR_CODE,
-              Html5QrcodeSupportedFormats.EAN_13,
-              Html5QrcodeSupportedFormats.EAN_8,
-              Html5QrcodeSupportedFormats.CODE_128,
-              Html5QrcodeSupportedFormats.UPC_A,
-              Html5QrcodeSupportedFormats.UPC_E,
-              Html5QrcodeSupportedFormats.DATA_MATRIX
-            ]
-          }
-        );
-
-      productScannerRef.current =
-        scanner;
-
-      const config = {
-        fps: 10,
-
-        qrbox: {
-          width:
-            window.innerWidth < 768
-              ? 260
-              : 240,
-
-          height:
-            window.innerWidth < 768
-              ? 180
-              : 180
-        },
-
-        aspectRatio: 1.333
-      };
-
-      const cameraConfig =
-        cameraId
-          ? cameraId
-          : {
-              facingMode: {
-                exact: "environment"
-              }
-            };
-
-      await scanner.start(
-        cameraConfig,
-        config,
-
-        async (decodedText) => {
-          if (
-            productScanProcessingRef.current
-          ) return;
-
-          productScanProcessingRef.current =
-            true;
-
-          const cleanCode =
-            String(decodedText || "").trim();
-
-          if (!cleanCode) {
-            productScanProcessingRef.current =
-              false;
-
-            return;
-          }
-
-          playScanSound();
-
-          setScannerMessage(
-            `Leyendo: ${cleanCode}`
-          );
-
-          await handleProductScanCode(
-            cleanCode
-          );
-        },
-
-        () => {}
-      );
-    } catch (err) {
-      console.log(
-        "❌ Error startProductScanner:",
-        err
-      );
-
-      if (
-        !cameraId &&
-        selectedProductCameraId
-      ) {
-        await startProductScanner(
-          selectedProductCameraId
-        );
-
-        return;
-      }
-
-      setScannerMessage(
-        "No se pudo acceder a la cámara principal"
-      );
-    }
-  };
-
-  const changeProductCamera = async (
-    cameraId
-  ) => {
-    setSelectedProductCameraId(
-      cameraId
-    );
-
-    productScanProcessingRef.current =
-      false;
-
-    setScannerMessage(
-      "Cambiando cámara..."
-    );
-
-    await startProductScanner(
-      cameraId
-    );
-
-    setScannerMessage("");
-  };
-
-  const closeProductScanner = async () => {
-    await stopProductScanner();
-
-    productScanProcessingRef.current =
-      false;
-
-    setScannerMessage("");
-
-    setShowProductScanner(false);
-  };
-
-  const restartProductScanner = () => {
-    productScanProcessingRef.current =
-      false;
-
-    setTimeout(() => {
-      startProductScanner(
-        selectedProductCameraId
-      );
-    }, 800);
-  };
 
   /* =========================
      LOAD CUSTOMERS
@@ -984,7 +688,7 @@ function SalesAdmin() {
   const addProductToCart = (
     productRaw
   ) => {
-    if (!productRaw) return;
+    if (!productRaw) return false;
 
     const product =
       normalizeVariant(productRaw);
@@ -997,7 +701,7 @@ function SalesAdmin() {
         "Este producto no tiene stock disponible"
       );
 
-      return;
+      return false;
     }
 
     const existing =
@@ -1017,7 +721,7 @@ function SalesAdmin() {
           `No puedes agregar más unidades. Stock disponible: ${stock}`
         );
 
-        return;
+        return false;
       }
 
       updatedCart =
@@ -1048,6 +752,7 @@ function SalesAdmin() {
     setCart(updatedCart);
 
     calculateSubtotal(updatedCart);
+    return true;
   };
 
   const updateCartQuantity = (
@@ -1138,127 +843,19 @@ function SalesAdmin() {
     calculateSubtotal(updatedCart);
   };
 
-  /* =========================
-     HANDLE PRODUCT SCAN
-  ========================= */
-
-  const handleProductScanCode = async (
-    code
-  ) => {
-    const releaseProductScanner = (
-      clearDelay = 1800
-    ) => {
-      setTimeout(() => {
-        productScanProcessingRef.current = false;
-      }, 1200);
-
-      setTimeout(() => {
-        setScannerMessage("");
-      }, clearDelay);
-    };
-
-    try {
-      const cleanCode =
-        String(code || "").trim();
-
-      if (!cleanCode) {
-        productScanProcessingRef.current = false;
-        return;
-      }
-
-      const lowerCode =
-        cleanCode.toLowerCase();
-
-      const looksLikeCustomerQR =
-        lowerCode.includes("/admin/sales/") ||
-        lowerCode.includes("/card/") ||
-        lowerCode.includes("/customer/");
-
-      if (looksLikeCustomerQR) {
-        setScannerMessage(
-          "Este QR es de cliente. Aquí debes escanear un producto."
-        );
-
-        releaseProductScanner(2200);
-        return;
-      }
-
-      setScannerMessage(
-        `Leyendo: ${cleanCode}`
-      );
-
-      const response =
-        await fetch(
-          `${API_URL}/api/products/qr/${encodeURIComponent(cleanCode)}`
-        );
-
-      const data =
-        await response
-          .json()
-          .catch(() => null);
-
-      if (!response.ok || !data) {
-        setScannerMessage(
-          data?.message ||
-          "Producto no encontrado. Escanea un código de producto."
-        );
-
-        releaseProductScanner(2200);
-        return;
-      }
-
-      const product =
-        normalizeVariant(data);
-
-      if (!product.ProductVariantId) {
-        setScannerMessage(
-          "El producto leído no tiene una variante válida."
-        );
-
-        releaseProductScanner(2200);
-        return;
-      }
-
-      if (Number(product.Stock || 0) <= 0) {
-        setScannerMessage(
-          "Este producto no tiene stock disponible."
-        );
-
-        releaseProductScanner(2200);
-        return;
-      }
-
-      addProductToCart(product);
-
-      setScannerMessage(
-        `✅ Agregado: ${product.Marca} ${product.Modelo} ${product.Color} ${product.PowerLabel}`
-      );
-
-      await stopProductScanner();
-
-      setTimeout(() => {
-        setShowProductScanner(false);
-        setScannerMessage("");
-      }, 500);
-    } catch (err) {
-      console.log(
-        "❌ Error scan product:",
-        err
-      );
-
-      setScannerMessage(
-        "Error al escanear producto. Intenta de nuevo."
-      );
-
-      releaseProductScanner(2200);
-    }
+  const handleScannedProduct = (raw) => {
+    const product=normalizeVariant(raw);
+    if(!product.ProductVariantId || !product.ProductId) throw new Error('El código no identifica una variante válida.');
+    if(product.Status==='Inactivo'||product.VariantStatus==='Inactivo'||product.ProductStatus==='Inactivo')throw new Error('Este producto está inactivo.');
+    const inCart=cart.find(item=>String(item.ProductVariantId)===String(product.ProductVariantId));
+    if(Number(product.Stock)<=0)throw new Error('Este producto no tiene existencias disponibles.');
+    if(inCart && Number(inCart.Quantity)>=Number(product.Stock))throw new Error('Ya agregaste todas las unidades disponibles de esta variante.');
+    if(!addProductToCart(product))throw new Error('No se pudo agregar el producto al carrito.');
+    playScanSound();
+    setScannerMessage(`Agregado: ${product.Marca} ${product.Modelo} · ${product.Color} · ${product.PowerLabel}`);
   };
 
-  /* =========================
-     HANDLE REDEEM POINTS  /* =========================
-     HANDLE REDEEM POINTS
-  ========================= */
-
+  /* Canje de puntos: la lógica SQL permanece pendiente del diagnóstico. */
   const handleRedeemPoints = (value) => {
     let points =
       Number(value || 0);
@@ -1486,6 +1083,9 @@ function SalesAdmin() {
           calculatePoints()
         );
 
+      window.dispatchEvent(new Event('colorlensesSalesUpdated'));
+      try { localStorage.setItem('colorlenses-sales-updated', String(Date.now())); } catch {}
+      try {
       generateTicket(
         customerData,
         cart,
@@ -1499,6 +1099,10 @@ function SalesAdmin() {
         finalTotal,
         pointsEarned
       );
+      } catch (ticketError) {
+        console.error('La venta se registró, pero falló la salida del comprobante:', ticketError);
+        alert(`La venta #${data.SaleId} sí quedó registrada. No la repitas; revisa el historial para el comprobante.`);
+      }
 
       alert(
         `✅ Venta registrada
@@ -1557,15 +1161,7 @@ function SalesAdmin() {
             </p>
           </div>
 
-          <button
-            className="admin-add-btn"
-            onClick={() =>
-              setShowProductScanner(true)
-            }
-          >
-            <ScanLine size={18} />
-            Escanear Producto
-          </button>
+
         </div>
 
         {/* CUSTOMER */}
@@ -1724,75 +1320,16 @@ function SalesAdmin() {
           )}
         </div>
 
-        {/* PRODUCT SCANNER */}
-
-        {showProductScanner && (
-          <div className="admin-form-card">
-            <div className="admin-form-header">
-              <h2>
-                Escanear Producto
-              </h2>
-
-              <button
-                className="admin-close-btn"
-                onClick={closeProductScanner}
-              >
-                ✕
-              </button>
-            </div>
-
-            <p>
-              Escanea el código de barras, QR de fábrica o QR interno.
-            </p>
-
-            {productCameras.length > 1 && (
-              <div className="camera-select-box">
-                <label>
-                  Cámara
-                </label>
-
-                <select
-                  value={selectedProductCameraId}
-                  onChange={(e) =>
-                    changeProductCamera(
-                      e.target.value
-                    )
-                  }
-                >
-                  {productCameras.map(
-                    (camera, index) => (
-                      <option
-                        key={camera.id}
-                        value={camera.id}
-                      >
-                        {camera.label ||
-                          `Cámara ${index + 1}`}
-                      </option>
-                    )
-                  )}
-                </select>
-              </div>
-            )}
-
-            <div
-              id="product-reader"
-              className="qr-reader"
-            ></div>
-
-            {scannerMessage && (
-              <div className="scanner-message">
-                {scannerMessage}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* PRODUCT MANUAL */}
 
-        <div className="admin-form-card">
-          <h2>
-            Producto
-          </h2>
+        <div className="admin-form-card cl-sale-product-section" ref={productSectionRef}>
+          <div className="cl-panel-heading">
+            <h2>Producto</h2>
+            <button ref={scanButtonRef} type="button" className="admin-add-btn" disabled={isSaving} onClick={()=>{setScannerMessage('');setShowProductScanner(true);}}>
+              <ScanLine size={18}/> Escanear producto
+            </button>
+          </div>
+          {scannerMessage&&<p className="cl-scan-success" role="status">{scannerMessage}</p>}
 
           <p>
             Puedes escanear el código o buscar la variante manualmente.
@@ -1803,6 +1340,7 @@ function SalesAdmin() {
 
             <input
               type="text"
+              ref={productSearchRef}
               placeholder="Buscar por modelo, marca, color, graduación, código..."
               value={productSearch}
               onChange={(e) =>
@@ -2248,6 +1786,7 @@ function SalesAdmin() {
           </div>
         )}
       </main>
+      {showProductScanner&&<SaleProductScanner onClose={closeProductScanner} onProduct={handleScannedProduct}/>}
     </div>
   );
 }

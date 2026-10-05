@@ -1,10 +1,11 @@
+import { apiFetch as fetch } from "../../utils/api";
 import { useEffect, useRef, useState } from "react";
 
 import { Html5Qrcode } from "html5-qrcode";
 
 import AdminSidebar from "../../components/AdminSidebar";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = (import.meta.env.VITE_API_URL || "");
 
 function QRScanner() {
   const [message, setMessage] = useState("");

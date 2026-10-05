@@ -1,0 +1,9 @@
+import { useState } from 'react';
+import { ResponsiveContainer,AreaChart,Area,XAxis,YAxis,Tooltip,CartesianGrid } from 'recharts';
+import useRemoteReport from '../../hooks/useRemoteReport';
+import { ReportState,currency } from './ReportParts';
+export default function RevenueChart(){
+ const [period,setPeriod]=useState('daily');
+ const result=useRemoteReport('/api/analytics/chart?period='+period);
+ return <section className="cl-dashboard-panel"><div className="cl-panel-heading"><div><span className="cl-eyebrow">EVOLUCIÓN</span><h2>Importe de ventas</h2><p>Registros de Sales, agrupados con el mismo calendario del resumen.</p></div><div className="cl-tabs" aria-label="Periodo de gráfica">{[['daily','Día'],['weekly','Semana'],['monthly','Mes'],['yearly','Año']].map(([key,label])=><button key={key} className={period===key?'active':''} aria-pressed={period===key} onClick={()=>setPeriod(key)}>{label}</button>)}</div></div><ReportState {...result} retry={result.refresh}/>{result.data&&<div className="cl-chart-area"><ResponsiveContainer width="100%" height={270}><AreaChart data={result.data.rows}><defs><linearGradient id={'cl-rose-'+period} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#d982a6" stopOpacity={.48}/><stop offset="100%" stopColor="#d982a6" stopOpacity={.03}/></linearGradient></defs><CartesianGrid vertical={false} stroke="#eee2e8"/><XAxis dataKey="LabelDate" minTickGap={32} tick={{fontSize:10}} tickFormatter={s=>s.length>7?s.slice(5):s}/><YAxis width={65} tick={{fontSize:11}}/><Tooltip formatter={(value,name)=>name==='Revenue'?[currency(value),'Importe']:[value,'Ventas']}/><Area type="monotone" dataKey="Revenue" stroke="#a64772" fill={`url(#cl-rose-${period})`} strokeWidth={2} isAnimationActive={false}/></AreaChart></ResponsiveContainer></div>}</section>;
+}

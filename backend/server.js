@@ -1,1 +1,2 @@
-require("./index");
+'use strict';
+require('./index').start();

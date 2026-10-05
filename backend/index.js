@@ -1,7 +1,6 @@
-require("dotenv").config();
+require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -11,13 +10,42 @@ const fs = require("fs");
 const db = require("./db");
 
 const app = express();
+const { createToken, verifyToken } = require('./lib/auth')(db);
+const withStockLock = require('./lib/stock-guard')(db);
 
 /* =========================
    MIDDLEWARES
 ========================= */
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({ exposedHeaders: ['Content-Disposition'] }));
+app.use(express.json({ limit: '1mb' }));
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  // Catálogo/configuración de lectura siguen públicos. El resto es administrativo.
+  const publicRead = req.method === 'GET' && (
+    ['/api/test','/api/health','/api/products','/api/product-variants','/api/powers'].includes(req.path) ||
+    /^\/api\/(?:products|product-variants)\/\d+(?:\/variants)?$/.test(req.path) ||
+    /^\/api\/settings\/(?:brands|categories|colors|banners)$/.test(req.path) ||
+    /^\/api\/cards\/[^/]+$/.test(req.path)
+  );
+  if (!req.path.startsWith('/api/') || req.method === 'OPTIONS' || publicRead || req.path === '/api/auth/login') return next();
+  return verifyToken(req, res, next);
+});
+app.get('/api/health', (req,res) => res.json({ ok:true, version:'2.1.3' }));
+// Tarjeta pública por su slug: no exponer todo el padrón de clientes.
+app.get('/api/cards/:slug', async (req,res)=>{
+  try {
+    if(req.params.slug.length>190)return res.status(400).json({message:'Tarjeta inválida.'});
+    const [rows]=await db.execute('SELECT FullName,CardSlug,Level FROM Customers WHERE CardSlug=? AND Status=\'Activo\' LIMIT 1',[req.params.slug]);
+    if(!rows.length)return res.status(404).json({message:'Tarjeta no encontrada o inactiva.'});
+    res.json(rows[0]);
+  } catch {res.status(500).json({message:'No se pudo cargar esta tarjeta.'});}
+});
+app.use('/api/inventory', require('./routes/inventory')(db));
+app.use('/api/reports', require('./routes/reports')(db));
+app.use('/api/analytics', require('./routes/analytics')(db));
 
 /* =========================
    UPLOADS FOLDER
@@ -98,7 +126,13 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({
-  storage
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter(req,file,cb){
+    const ext=path.extname(file.originalname).toLowerCase();
+    if(!['.jpg','.jpeg','.png','.webp','.gif'].includes(ext)||!['image/jpeg','image/png','image/webp','image/gif'].includes(file.mimetype))return cb(new Error('Solo se permiten imágenes JPG, PNG, WebP o GIF de hasta 10 MB.'));
+    cb(null,true);
+  }
 });
 
 /* =========================
@@ -205,7 +239,7 @@ app.get("/api/products/:id", async (req, res) => {
   }
 });
 
-app.post("/api/products", async (req, res) => {
+app.post("/api/products", withStockLock(async (req, res) => {
   try {
     const {
       SKU,
@@ -216,7 +250,7 @@ app.post("/api/products", async (req, res) => {
       Image
     } = req.body;
 
-    const [rows] = await db.execute(
+    const [rows] = await req.stockConnection.execute(
       "CALL CreateProduct(?,?,?,?,?,?)",
       [
         safeString(SKU),
@@ -242,7 +276,7 @@ app.post("/api/products", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
 
 app.post("/api/products/find-base", async (req, res) => {
@@ -297,7 +331,7 @@ app.post("/api/products/find-base", async (req, res) => {
 
 
 
-app.put("/api/products/:id", async (req, res) => {
+app.put("/api/products/:id", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -313,11 +347,15 @@ app.put("/api/products/:id", async (req, res) => {
       Status
     } = req.body;
 
-    await db.execute(
+    // SKU is no longer an editable UI field. Preserve its stored value for legacy SP compatibility.
+    const [originalRows] = await req.stockConnection.execute('SELECT SKU FROM Products WHERE Id=?', [id]);
+    if(!originalRows.length) return res.status(404).json({message:'Producto no encontrado.'});
+    const preservedSKU = originalRows[0].SKU;
+    await req.stockConnection.execute(
       "CALL UpdateProduct(?,?,?,?,?,?,?,?,?,?)",
       [
         id,
-        safeString(SKU),
+        preservedSKU,
         safeString(Category),
         safeString(Marca),
         safeString(Modelo),
@@ -342,13 +380,13 @@ app.put("/api/products/:id", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
-app.delete("/api/products/:id", async (req, res) => {
+app.delete("/api/products/:id", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL DeleteProduct(?)",
       [id]
     );
@@ -366,13 +404,13 @@ app.delete("/api/products/:id", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
-app.put("/api/products/:id/reactivate", async (req, res) => {
+app.put("/api/products/:id/reactivate", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL ReactivateProduct(?)",
       [id]
     );
@@ -390,7 +428,7 @@ app.put("/api/products/:id/reactivate", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
 /* =========================
    PRODUCT VARIANTS API
@@ -402,8 +440,12 @@ app.get("/api/product-variants", async (req, res) => {
     const [rows] = await db.execute(
       "CALL GetProductVariants()"
     );
-
-    res.json(rows[0]);
+    let hidden = new Set();
+    try {
+      const [drafts] = await db.execute('SELECT ProductVariantId FROM CLInventoryDrafts WHERE ReviewedAt IS NULL');
+      hidden = new Set(drafts.map(d => Number(d.ProductVariantId)));
+    } catch (e) { if (e.code !== 'ER_NO_SUCH_TABLE') throw e; }
+    res.json((rows[0] || []).filter(v => !hidden.has(Number(v.ProductVariantId || v.Id))));
   } catch (err) {
     console.log("❌ Get product variants error:", err);
 
@@ -432,101 +474,6 @@ app.get("/api/product-variants-inactive", async (req, res) => {
     });
   }
 });
-
-app.get("/api/reports/products/export", async (req, res) => {
-  try {
-    const {
-      marca = "",
-      category = "",
-      modelo = "",
-      color = "",
-      powerType = "all",
-      status = "active",
-      stockMode = "all",
-      codeType = "all"
-    } = req.query;
-
-    const [rows] = await db.execute(
-      "CALL GetProductExportReport(?,?,?,?,?,?,?,?)",
-      [
-        safeString(marca),
-        safeString(category),
-        safeString(modelo),
-        safeString(color),
-        safeString(powerType),
-        safeString(status),
-        safeString(stockMode),
-        safeString(codeType)
-      ]
-    );
-
-    const data = rows[0] || [];
-
-    const headers = [
-      "ProductVariantId",
-      "ProductId",
-      "Category",
-      "Marca",
-      "Modelo",
-      "Color",
-      "Power",
-      "PowerLabel",
-      "Price",
-      "Stock",
-      "FactoryCode",
-      "InternalCode",
-      "ScanCode",
-      "CodeType",
-      "VariantStatus",
-      "ProductStatus",
-      "Image",
-      "Image2",
-      "Image3"
-    ];
-
-    const escapeCsvValue = (value) => {
-      if (value === null || value === undefined) {
-        return "";
-      }
-
-      const cleanValue = String(value).replace(/"/g, '""');
-
-      return `"${cleanValue}"`;
-    };
-
-    const csvRows = [
-      headers.join(","),
-      ...data.map((item) =>
-        headers
-          .map((header) => escapeCsvValue(item[header]))
-          .join(",")
-      )
-    ];
-
-    const csvContent = "\uFEFF" + csvRows.join("\n");
-
-    const fileName = `product-report-${Date.now()}.csv`;
-
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${fileName}"`
-    );
-
-    res.send(csvContent);
-  } catch (err) {
-    console.log("❌ Error export product report:", err);
-
-    res.status(500).json({
-      message: "Error generando reporte de productos",
-      error: err.message,
-      sqlMessage: err.sqlMessage
-    });
-  }
-});
-
-
 
 app.get("/api/products/:id/variants", async (req, res) => {
   try {
@@ -578,7 +525,7 @@ app.get("/api/product-variants/:id", async (req, res) => {
   }
 });
 
-app.post("/api/product-variants", async (req, res) => {
+app.post("/api/product-variants", withStockLock(async (req, res) => {
   try {
     const {
       ProductId,
@@ -621,7 +568,7 @@ app.post("/api/product-variants", async (req, res) => {
         ? "Sin graduación"
         : safeString(PowerLabel || Number(cleanPower).toFixed(2));
 
-    const [rows] = await db.execute(
+    const [rows] = await req.stockConnection.execute(
       "CALL CreateProductVariant(?,?,?,?,?,?,?,?,?,?)",
       [
         safeNumber(ProductId),
@@ -655,9 +602,9 @@ app.post("/api/product-variants", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
-app.put("/api/product-variants/:id", async (req, res) => {
+app.put("/api/product-variants/:id", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -730,7 +677,7 @@ app.put("/api/product-variants/:id", async (req, res) => {
         ? "Inactivo"
         : cleanString(Status || "Activo");
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL UpdateProductVariant(?,?,?,?,?,?,?,?,?,?,?,?)",
       [
         cleanNumber(id),
@@ -760,13 +707,13 @@ app.put("/api/product-variants/:id", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
-app.delete("/api/product-variants/:id", async (req, res) => {
+app.delete("/api/product-variants/:id", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL DeleteProductVariant(?)",
       [id]
     );
@@ -784,13 +731,13 @@ app.delete("/api/product-variants/:id", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
-app.put("/api/product-variants/:id/reactivate", async (req, res) => {
+app.put("/api/product-variants/:id/reactivate", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL ReactivateProductVariant(?)",
       [id]
     );
@@ -808,7 +755,7 @@ app.put("/api/product-variants/:id/reactivate", async (req, res) => {
       sqlMessage: err.sqlMessage
     });
   }
-});
+}));
 
 /* =========================
    SCAN PRODUCT BY CODE
@@ -1347,425 +1294,9 @@ app.get("/api/sales/:id", async (req, res) => {
    WITH POINTS EXPIRATION
 ========================= */
 
-app.post("/api/sales", async (req, res) => {
-  const connection =
-    await db.getConnection();
-
-  try {
-    await connection.beginTransaction();
-
-    const {
-      CustomerId,
-      Subtotal,
-      Discount,
-      RedeemedPoints,
-      Total,
-      Cart
-    } = req.body;
-
-    const cleanCustomerId =
-      safeNumber(CustomerId);
-
-    const cleanSubtotal =
-      safeNumber(Subtotal ?? Total);
-
-    const cleanDiscount =
-      safeNumber(Discount);
-
-    const cleanRedeemedPoints =
-      safeNumber(RedeemedPoints);
-
-    const cleanTotal =
-      safeNumber(Total);
-
-    const cleanCart =
-      Array.isArray(Cart)
-        ? Cart
-        : [];
-
-    if (!cleanCustomerId) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message: "Cliente requerido"
-      });
-    }
-
-    if (cleanCart.length === 0) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message: "Carrito vacío"
-      });
-    }
-
-    const [customerRows] =
-      await connection.execute(
-        `
-        SELECT
-          Id,
-          FullName,
-          Points,
-          Status,
-          Level
-        FROM Customers
-        WHERE Id = ?
-        LIMIT 1
-        `,
-        [cleanCustomerId]
-      );
-
-    const customer =
-      customerRows[0];
-
-    if (!customer) {
-      await connection.rollback();
-
-      return res.status(404).json({
-        message: "Cliente no encontrado"
-      });
-    }
-
-    if (customer.Status === "Inactivo") {
-      await connection.rollback();
-
-      return res.status(403).json({
-        message:
-          "Este cliente está inactivo y no puede realizar compras."
-      });
-    }
-
-    await connection.execute(
-      "CALL RecalculateCustomerPoints(?)",
-      [cleanCustomerId]
-    );
-
-    const [pointsRows] =
-      await connection.execute(
-        "CALL GetCustomerAvailablePoints(?)",
-        [cleanCustomerId]
-      );
-
-    const pointsData =
-      pointsRows[0][0];
-
-    const currentPoints =
-      safeNumber(
-        pointsData?.AvailablePoints ??
-        customer.Points
-      );
-
-    if (cleanRedeemedPoints > currentPoints) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message:
-          "El cliente no tiene suficientes puntos vigentes para canjear."
-      });
-    }
-
-    if (cleanRedeemedPoints > cleanSubtotal) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message:
-          "No puedes canjear más puntos que el subtotal de la venta."
-      });
-    }
-
-    if (cleanDiscount !== cleanRedeemedPoints) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message:
-          "El descuento debe ser igual a los puntos canjeados."
-      });
-    }
-
-    const expectedTotal =
-      cleanSubtotal - cleanDiscount;
-
-    if (
-      Number(expectedTotal.toFixed(2)) !==
-      Number(cleanTotal.toFixed(2))
-    ) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        message:
-          "El total no coincide con subtotal menos descuento."
-      });
-    }
-
-    /* =========================
-       VALIDATE VARIANTS STOCK
-    ========================= */
-
-    for (const item of cleanCart) {
-      const productVariantId =
-        safeNumber(
-          item.ProductVariantId ||
-          item.VariantId ||
-          item.Id
-        );
-
-      const quantity =
-        safeNumber(
-          item.Quantity || 1
-        );
-
-      const price =
-        safeNumber(item.Price);
-
-      if (
-        !productVariantId ||
-        quantity <= 0 ||
-        price <= 0
-      ) {
-        await connection.rollback();
-
-        return res.status(400).json({
-          message: "Variante inválida en el carrito",
-          item
-        });
-      }
-
-      const [variantRows] =
-        await connection.execute(
-          `
-          SELECT
-            v.Id AS ProductVariantId,
-            v.ProductId,
-            v.Color,
-            v.Power,
-            v.PowerLabel,
-            v.Price,
-            v.Stock,
-            v.Status AS VariantStatus,
-            p.Modelo,
-            p.Marca,
-            p.Status AS ProductStatus
-          FROM ProductVariants v
-          INNER JOIN Products p
-            ON p.Id = v.ProductId
-          WHERE v.Id = ?
-          LIMIT 1
-          `,
-          [productVariantId]
-        );
-
-      const variant =
-        variantRows[0];
-
-      if (!variant) {
-        await connection.rollback();
-
-        return res.status(404).json({
-          message: `Variante ${productVariantId} no encontrada`
-        });
-      }
-
-      if (variant.ProductStatus === "Inactivo") {
-        await connection.rollback();
-
-        return res.status(400).json({
-          message: `El producto ${variant.Modelo || productVariantId} está inactivo`
-        });
-      }
-
-      if (variant.VariantStatus === "Inactivo") {
-        await connection.rollback();
-
-        return res.status(400).json({
-          message: `La variante ${variant.Modelo || productVariantId} está inactiva`
-        });
-      }
-
-      if (safeNumber(variant.Stock) < quantity) {
-        await connection.rollback();
-
-        return res.status(400).json({
-          message: `Stock insuficiente para ${variant.Marca} ${variant.Modelo} ${variant.Color} ${variant.PowerLabel}. Disponible: ${variant.Stock}`
-        });
-      }
-    }
-
-    /* =========================
-       CREATE SALE
-    ========================= */
-
-    const [saleRows] =
-      await connection.execute(
-        "CALL RegisterSaleWithRedemption(?,?,?,?,?)",
-        [
-          cleanCustomerId,
-          cleanSubtotal,
-          cleanDiscount,
-          cleanRedeemedPoints,
-          cleanTotal
-        ]
-      );
-
-    const saleData =
-      saleRows?.[0]?.[0] || {};
-
-    const saleId =
-      saleData.SaleId ||
-      saleData.Id ||
-      saleData.NewSaleId;
-
-    if (!saleId) {
-      await connection.rollback();
-
-      return res.status(500).json({
-        message:
-          "La venta se creó pero no se recibió SaleId desde RegisterSaleWithRedemption.",
-        saleData
-      });
-    }
-
-    /* =========================
-       CREATE SALE ITEMS
-       UPDATE VARIANT STOCK
-    ========================= */
-
-    for (const item of cleanCart) {
-      const productVariantId =
-        safeNumber(
-          item.ProductVariantId ||
-          item.VariantId ||
-          item.Id
-        );
-
-      const productId =
-        safeNumber(
-          item.ProductId
-        );
-
-      const quantity =
-        safeNumber(
-          item.Quantity || 1
-        );
-
-      const price =
-        safeNumber(item.Price);
-
-      const itemSubtotal =
-        price * quantity;
-
-      if (!productId) {
-        await connection.rollback();
-
-        return res.status(400).json({
-          message:
-            "ProductId faltante en variante del carrito",
-          item
-        });
-      }
-
-      await connection.execute(
-        "CALL CreateSaleItem(?,?,?,?,?,?)",
-        [
-          saleId,
-          productId,
-          productVariantId,
-          quantity,
-          price,
-          itemSubtotal
-        ]
-      );
-
-      await connection.execute(
-        "CALL UpdateProductVariantStock(?,?)",
-        [
-          productVariantId,
-          quantity
-        ]
-      );
-    }
-
-    /* =========================
-       POINTS
-    ========================= */
-
-    const pointsEarned =
-      calculatePointsByLevel(
-        cleanTotal,
-        customer.Level
-      );
-
-    await connection.execute(
-      "CALL UpdateCustomerStatsWithRedemption(?,?,?,?)",
-      [
-        cleanCustomerId,
-        cleanTotal,
-        0,
-        0
-      ]
-    );
-
-    if (cleanRedeemedPoints > 0) {
-      await connection.execute(
-        "CALL RedeemCustomerPoints(?,?)",
-        [
-          cleanCustomerId,
-          cleanRedeemedPoints
-        ]
-      );
-    }
-
-    if (pointsEarned > 0) {
-      await connection.execute(
-        "CALL AddCustomerPoints(?,?,?)",
-        [
-          cleanCustomerId,
-          saleId,
-          pointsEarned
-        ]
-      );
-    }
-
-    await connection.execute(
-      "CALL RecalculateCustomerPoints(?)",
-      [cleanCustomerId]
-    );
-
-    await connection.commit();
-
-    res.json({
-      success: true,
-      SaleId: saleId,
-      Subtotal: cleanSubtotal,
-      Discount: cleanDiscount,
-      RedeemedPoints: cleanRedeemedPoints,
-      Total: cleanTotal,
-      PointsEarned: pointsEarned,
-      PointsExpiresAt:
-        pointsEarned > 0
-          ? new Date(
-              Date.now() +
-              365 * 24 * 60 * 60 * 1000
-            )
-          : null,
-      message: "✅ Venta registrada"
-    });
-  } catch (err) {
-    await connection.rollback();
-
-    console.log("❌ Error register sale:", err);
-
-    res.status(500).json({
-      message: "Error al registrar venta",
-      error: err.message,
-      code: err.code,
-      sqlMessage: err.sqlMessage
-    });
-  } finally {
-    connection.release();
-  }
-});
-
-
+app.post("/api/sales", withStockLock(
+  require('./lib/sales-service')({ calculatePointsByLevel })
+));
 
 /* =========================
    DASHBOARD STATS API
@@ -1978,7 +1509,7 @@ app.get("/api/settings/brands-inactive", async (req, res) => {
   }
 });
 
-app.post("/api/settings/brands", async (req, res) => {
+app.post("/api/settings/brands", withStockLock(async (req, res) => {
   try {
     const { Name } = req.body;
 
@@ -1988,7 +1519,7 @@ app.post("/api/settings/brands", async (req, res) => {
       });
     }
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL CreateProductBrand(?)",
       [safeString(Name)]
     );
@@ -2001,14 +1532,14 @@ app.post("/api/settings/brands", async (req, res) => {
     console.log("❌ Create brand error:", err);
     res.status(500).json(err);
   }
-});
+}));
 
-app.put("/api/settings/brands/:id", async (req, res) => {
+app.put("/api/settings/brands/:id", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
     const { Name, Status } = req.body;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL UpdateProductBrand(?,?,?)",
       [
         id,
@@ -2025,13 +1556,13 @@ app.put("/api/settings/brands/:id", async (req, res) => {
     console.log("❌ Update brand error:", err);
     res.status(500).json(err);
   }
-});
+}));
 
-app.delete("/api/settings/brands/:id", async (req, res) => {
+app.delete("/api/settings/brands/:id", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL DeleteProductBrand(?)",
       [id]
     );
@@ -2044,13 +1575,13 @@ app.delete("/api/settings/brands/:id", async (req, res) => {
     console.log("❌ Delete brand error:", err);
     res.status(500).json(err);
   }
-});
+}));
 
-app.put("/api/settings/brands/:id/reactivate", async (req, res) => {
+app.put("/api/settings/brands/:id/reactivate", withStockLock(async (req, res) => {
   try {
     const { id } = req.params;
 
-    await db.execute(
+    await req.stockConnection.execute(
       "CALL ReactivateProductBrand(?)",
       [id]
     );
@@ -2063,7 +1594,7 @@ app.put("/api/settings/brands/:id/reactivate", async (req, res) => {
     console.log("❌ Reactivate brand error:", err);
     res.status(500).json(err);
   }
-});
+}));
 
 /* =========================
    SETTINGS - CATEGORIES API
@@ -2448,62 +1979,6 @@ app.put("/api/settings/banners/:id/reactivate", async (req, res) => {
    AUTH HELPERS
 ========================= */
 
-const JWT_SECRET =
-  process.env.JWT_SECRET ||
-  "colorlenses_super_secret_2026";
-
-const createToken = (user) => {
-  return jwt.sign(
-    {
-      id: user.Id,
-      username: user.Username,
-      fullName: user.FullName,
-      role: user.Role
-    },
-    JWT_SECRET,
-    {
-      expiresIn: "8h"
-    }
-  );
-};
-
-/* =========================
-   VERIFY TOKEN MIDDLEWARE
-========================= */
-
-const verifyToken = (req, res, next) => {
-  try {
-    const authHeader =
-      req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({
-        message: "Token requerido"
-      });
-    }
-
-    const token =
-      authHeader.split(" ")[1];
-
-    if (!token) {
-      return res.status(401).json({
-        message: "Token inválido"
-      });
-    }
-
-    const decoded =
-      jwt.verify(token, JWT_SECRET);
-
-    req.user = decoded;
-
-    next();
-  } catch (err) {
-    return res.status(401).json({
-      message: "Sesión expirada o inválida"
-    });
-  }
-};
-
 /* =========================
    LOGIN ADMIN
 ========================= */
@@ -2592,7 +2067,7 @@ app.post("/api/auth/login", async (req, res) => {
    AUTH ME
 ========================= */
 
-app.get("/api/auth/me", verifyToken, async (req, res) => {
+app.get("/api/auth/me", async (req, res) => {
   try {
     res.json({
       success: true,
@@ -2610,6 +2085,8 @@ app.get("/api/auth/me", verifyToken, async (req, res) => {
    HOSTINGER ROOT = backend
    React build must be in backend/public
 ========================= */
+
+app.use('/api', (req,res) => res.status(404).json({ message:'Ruta API no encontrada.' }));
 
 const frontendPath =
   path.join(__dirname, "public");
@@ -2635,8 +2112,8 @@ app.use((req, res, next) => {
 const PORT =
   process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(
-    `🚀 Servidor corriendo en puerto ${PORT}`
-  );
-});
+function start() {
+  return app.listen(PORT, () => console.log(`ColorLenses 2.1.3 disponible en puerto ${PORT}`));
+}
+if (require.main === module) start();
+module.exports = { app, start };

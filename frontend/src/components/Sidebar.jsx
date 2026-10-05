@@ -1,3 +1,4 @@
+import BrandLogo from './BrandLogo';
 import { motion, AnimatePresence } from "framer-motion";
 
 import {
@@ -32,9 +33,9 @@ function Sidebar({ isOpen, setIsOpen }) {
       path: "/favorites"
     },
     {
-      name: "Perfil",
+      name: "Admin",
       icon: <User size={20} />,
-      path: "/profile"
+      path: "/admin/login"
     }
   ];
 
@@ -63,7 +64,9 @@ function Sidebar({ isOpen, setIsOpen }) {
       </AnimatePresence>
 
       <motion.aside
-        className="sidebar site-sidebar-panel"
+        className={`sidebar site-sidebar-panel ${isOpen ? "open" : ""}`}
+        aria-hidden={!isOpen}
+        inert={!isOpen ? true : undefined}
         initial={false}
         animate={{
           x: isOpen ? 0 : -360
@@ -76,8 +79,7 @@ function Sidebar({ isOpen, setIsOpen }) {
       >
         <div className="sidebar-header">
           <div>
-            <h2>ColorLenses</h2>
-            <p>Beauty contact lenses</p>
+            <Link to="/" aria-label="ColorLenses, inicio" onClick={() => setIsOpen(false)}><BrandLogo dark/></Link>
           </div>
 
           <button

@@ -1,3 +1,7 @@
+import { request } from "../../utils/api";
+import ProductFilters, { emptyFilters } from "../../components/ProductFilters";
+import { matchesProduct as matchesProductFilters, categoryKey } from "../../utils/productFilters";
+import { apiFetch as fetch } from "../../utils/api";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { QRCodeSVG } from "qrcode.react";
@@ -21,7 +25,7 @@ import {
 
 import AdminSidebar from "../../components/AdminSidebar";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = (import.meta.env.VITE_API_URL || "");
 
 const PAGE_SIZE = 10;
 
@@ -33,8 +37,10 @@ function ProductsAdmin() {
   const [colors, setColors] = useState([]);
   const [powers, setPowers] = useState([]);
 
-  const [viewMode, setViewMode] = useState("active");
+  const [viewMode, setViewMode] = useState(() => new URLSearchParams(window.location.search).get("view") === "pending" ? "pending" : "active");
   const [search, setSearch] = useState("");
+  const [advancedFilters, setAdvancedFilters] = useState({...emptyFilters});
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   const [codeSearch, setCodeSearch] = useState("");
   const [codeSearchMessage, setCodeSearchMessage] = useState("");
@@ -92,7 +98,7 @@ function ProductsAdmin() {
   const audioContextRef = useRef(null);
 
   const [formData, setFormData] = useState({
-    SKU: "",
+
     Category: "",
     Marca: "",
     Modelo: "",
@@ -171,9 +177,6 @@ function ProductsAdmin() {
       ProductId:
         product.ProductId ||
         product.ProductID,
-
-      SKU:
-        product.SKU || "",
 
       Category:
         product.Category || "",
@@ -341,7 +344,9 @@ function ProductsAdmin() {
   const loadProducts = async () => {
     try {
       const endpoint =
-        viewMode === "active"
+        viewMode === "pending"
+          ? `${API_URL}/api/inventory/drafts`
+          : viewMode === "active"
           ? `${API_URL}/api/product-variants`
           : `${API_URL}/api/product-variants-inactive`;
 
@@ -444,6 +449,7 @@ function ProductsAdmin() {
           .includes(searchText);
 
       return (
+        matchesProductFilters(product, advancedFilters) &&
         matchesBrand &&
         matchesCategory &&
         matchesProduct &&
@@ -459,7 +465,8 @@ function ProductsAdmin() {
     brandFilter,
     categoryFilter,
     productFilter,
-    powerFilter
+    powerFilter,
+    advancedFilters
   ]);
 
   const totalPages = Math.max(
@@ -487,6 +494,7 @@ function ProductsAdmin() {
   );
 
   const clearFilters = () => {
+    setAdvancedFilters({...emptyFilters});
     setSearch("");
     setBrandFilter("");
     setCategoryFilter("");
@@ -938,7 +946,7 @@ function ProductsAdmin() {
 
   const resetForm = () => {
     setFormData({
-      SKU: "",
+
       Category: "",
       Marca: "",
       Modelo: "",
@@ -1148,7 +1156,7 @@ function ProductsAdmin() {
       const imageUrl = await uploadImageIfNeeded();
 
       const productPayload = {
-        SKU: formData.SKU || "",
+
         Category: String(formData.Category || "").trim(),
         Marca: String(formData.Marca || "").trim(),
         Modelo: String(formData.Modelo || "").trim(),
@@ -1341,7 +1349,7 @@ function ProductsAdmin() {
     const isInternal = product.CodeType === "INTERNAL";
 
     setFormData({
-      SKU: product.SKU || "",
+
       Category: product.Category || "",
       Marca: product.Marca || "",
       Modelo: product.Modelo || "",
@@ -1465,7 +1473,7 @@ function ProductsAdmin() {
             "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            SKU: selectedGalleryProduct.SKU || "",
+
             Category: selectedGalleryProduct.Category || "",
             Marca: selectedGalleryProduct.Marca || "",
             Modelo: selectedGalleryProduct.Modelo || "",
@@ -1921,6 +1929,17 @@ function ProductsAdmin() {
     }
   };
 
+  const publishPending = async (product) => {
+    if (!window.confirm(`Publicar ${product.Modelo}: confirma que marca, modelo, color, graduación y precio ya corresponden al producto físico. Esta acción habilitará la venta.`)) return;
+    try { await request(`/api/inventory/drafts/${getVariantId(product)}/publish`, {method:'POST',body:{confirmDetails:true}}); await loadProducts(); }
+    catch (e) { alert(e.message); }
+  };
+  const advancedOptions = {
+    brands:[...new Set([...brands.map(b=>b.Name), ...products.map(p=>p.Marca)].filter(Boolean))],
+    categories:[...new Set([...categories.map(c=>categoryKey(c.Name)), ...products.map(p=>categoryKey(p.Category))].filter(Boolean))],
+    colors:[...new Set([...colors.map(c=>c.Name), ...products.map(p=>p.Color)].filter(Boolean))],
+    powers:[...new Set(products.filter(p=>!Number(p.NeedsReview)).map(p=>Number(p.Power)))].sort((a,b)=>b-a)
+  };
   return (
     <div className="admin-page">
       <AdminSidebar />
@@ -1975,7 +1994,11 @@ function ProductsAdmin() {
           >
             Inactivos
           </button>
+          <button className={viewMode==='pending'?'product-mode-btn active':'product-mode-btn'} onClick={()=>{setViewMode('pending');clearFilters();void closeProductForm();}}>Pendientes de completar</button>
         </div>
+        {viewMode==='pending' && <div className="cl-alert"><span>Estos códigos se crearon durante un inventario. Conservan su stock, pero no se muestran al público ni se venden. Completa sus datos con Editar y después pulsa Publicar. Una marca en inventario debe finalizarse antes de editar.</span></div>}
+        <div className="cl-admin-filter-toggle"><button className="cl-btn cl-btn-light" onClick={()=>setShowAdvancedFilters(!showAdvancedFilters)}>Filtros múltiples: marcas, colores y graduaciones</button><a className="cl-text-btn" href="/admin/reports/products">Exportar reporte configurable →</a></div>
+        {showAdvancedFilters && <div className="cl-panel cl-admin-multifilters"><ProductFilters options={advancedOptions} filters={advancedFilters} onChange={next=>{setAdvancedFilters(next);setCurrentPage(1);}}/></div>}
 
         <div className="products-code-search-panel">
           <div>
@@ -2024,7 +2047,7 @@ function ProductsAdmin() {
               className="admin-save-btn products-scan-code-btn"
               onClick={openSearchCodeScanner}
             >
-              📷 Escanear
+              Escanear
             </button>
 
             <button
@@ -2283,7 +2306,7 @@ function ProductsAdmin() {
                         className="admin-save-btn"
                         onClick={openCodeScanner}
                       >
-                        📷 Escanear
+                        Escanear
                       </button>
                     </div>
                   </>
@@ -2539,9 +2562,10 @@ function ProductsAdmin() {
           </div>
         </div>
 
-        <div className="products-toolbar">
+        <div className="products-toolbar products-filters-toolbar">
           <div className="products-search-box">
             <select
+              aria-label="Filtrar por marca"
               value={brandFilter}
               onChange={(e) => setBrandFilter(e.target.value)}
             >
@@ -2557,6 +2581,7 @@ function ProductsAdmin() {
 
           <div className="products-search-box">
             <select
+              aria-label="Filtrar por producto"
               value={productFilter}
               onChange={(e) => setProductFilter(e.target.value)}
             >
@@ -2572,6 +2597,7 @@ function ProductsAdmin() {
 
           <div className="products-search-box">
             <select
+              aria-label="Filtrar por categoría"
               value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}
             >
@@ -2587,6 +2613,7 @@ function ProductsAdmin() {
 
           <div className="products-search-box">
             <select
+              aria-label="Filtrar por graduación"
               value={powerFilter}
               onChange={(e) => setPowerFilter(e.target.value)}
             >
@@ -2762,7 +2789,7 @@ function ProductsAdmin() {
                           <Images size={16} />
                         </button>
 
-                        {viewMode === "active" ? (
+                        {viewMode === "pending" || Number(product.NeedsReview) ? (<button className="reactivate-btn" title="Publicar producto revisado" onClick={()=>publishPending(product)}>Publicar</button>) : viewMode === "active" ? (
                           <button
                             className="delete-btn"
                             onClick={() => deleteProduct(variantId)}
@@ -2796,7 +2823,7 @@ function ProductsAdmin() {
                       ? "No se encontraron variantes con esos filtros."
                       : viewMode === "active"
                         ? "No hay variantes activas."
-                        : "No hay variantes inactivas."}
+                        : viewMode === "pending" ? "No hay productos pendientes de completar." : "No hay variantes inactivas."}
                   </td>
                 </tr>
               )}

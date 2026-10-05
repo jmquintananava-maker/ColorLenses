@@ -1,16 +1,20 @@
+import BrandLogo from '../../components/BrandLogo';
+import { apiFetch as fetch } from "../../utils/api";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 
-const API_URL = import.meta.env.VITE_API_URL;
+const API_URL = (import.meta.env.VITE_API_URL || "");
 
 function LoginAdmin() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [form, setForm] = useState({
     Username: "",
     Password: ""
   });
 
+  const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -47,7 +51,7 @@ function LoginAdmin() {
       localStorage.setItem("adminToken", data.token);
       localStorage.setItem("adminUser", JSON.stringify(data.user));
 
-      navigate("/admin");
+      navigate(location.state?.from?.startsWith("/admin/") && !location.state.from.startsWith("/admin/login") ? location.state.from : "/admin", {replace:true});
     } catch (err) {
       console.log(err);
       setMessage("Error de conexión");
@@ -57,44 +61,17 @@ function LoginAdmin() {
   };
 
   return (
-    <div className="login-admin-page">
-      <div className="login-admin-card">
-        <h1>ColorLenses</h1>
-
-        <p>Acceso administrativo</p>
-
+    <main className="login-admin-page">
+      <section className="cl-login-story"><Link to="/" className="cl-logo"><BrandLogo dark/></Link><span className="cl-eyebrow">BACKSTAGE / TU NEGOCIO</span><h1>DETRÁS DE<br/>CADA <em>mirada.</em></h1><p>Productos, ventas e inventario.<br/>Todo en un mismo lugar.</p><div className="cl-login-orbit" aria-hidden="true"><div className="cl-mini-iris"/></div><small>COLORLENSES — CENTRO DE CONTROL</small></section>
+      <section className="cl-login-form-side"><Link to="/" className="cl-underlined-link">← Volver a la tienda</Link><div className="login-admin-card"><span className="cl-eyebrow">ACCESO ADMINISTRATIVO</span><h2>Qué bueno<br/>tenerte de vuelta.</h2><p>Ingresa con tu cuenta de administración.</p>
         <form onSubmit={login}>
-          <input
-            type="text"
-            name="Username"
-            placeholder="Usuario"
-            value={form.Username}
-            onChange={handleChange}
-            required
-          />
-
-          <input
-            type="password"
-            name="Password"
-            placeholder="Contraseña"
-            value={form.Password}
-            onChange={handleChange}
-            required
-          />
-
-          {message && (
-            <div className="login-error">
-              {message}
-            </div>
-          )}
-
-          <button type="submit" disabled={loading}>
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
-      </div>
-    </div>
+          <label className="cl-field">Usuario<input type="text" name="Username" placeholder="Tu usuario" value={form.Username} onChange={handleChange} autoComplete="username" required/></label>
+          <label className="cl-field">Contraseña<span className="cl-password-field"><input type={visible?'text':'password'} name="Password" placeholder="Tu contraseña" value={form.Password} onChange={handleChange} autoComplete="current-password" required/><button type="button" onClick={()=>setVisible(v=>!v)} aria-label={visible?'Ocultar contraseña':'Mostrar contraseña'}>{visible?'Ocultar':'Ver'}</button></span></label>
+          {message && <div className="login-error" role="alert">{message}</div>}
+          <button className="cl-btn cl-btn-dark" type="submit" disabled={loading}>{loading ? "Entrando…" : "Entrar a mi espacio ↗"}</button>
+        </form><small className="cl-login-help">¿Olvidaste tu contraseña? Solicita a quien administra la base de datos que restablezca tu acceso.</small>
+      </div><small className="cl-login-version">COLORLENSES / 3.0.1</small></section>
+    </main>
   );
 }
-
 export default LoginAdmin;

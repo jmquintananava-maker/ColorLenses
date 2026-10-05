@@ -1,0 +1,45 @@
+/* ColorLenses 2.1.3. Clases aisladas: no hereda alturas, máscaras ni bordes del carrusel anterior. */
+.cl-beauty-hero{--hero-bg:#171217;--hero-ink:#fff;--hero-muted:#edd9e3;--hero-action:#f3b8d0;--hero-action-ink:#171217;width:min(calc(100% - 48px),1560px);margin:0 auto;font-family:var(--cl-sans,Arial,sans-serif);background:var(--hero-bg);color:var(--hero-ink);isolation:isolate;overflow:hidden}
+.cl-beauty-doll{--hero-bg:#f7d1e2;--hero-ink:#171217;--hero-muted:#634052;--hero-action:#171217;--hero-action-ink:#fff}
+.cl-beauty-night{--hero-bg:#19121d;--hero-action:#f2b5cf}
+.cl-beauty-stage{position:relative;display:flex;align-items:center;min-height:560px;isolation:isolate;overflow:hidden}
+.cl-beauty-visual{position:absolute;top:0;bottom:0;right:0;width:68%;overflow:hidden;z-index:0;background:var(--hero-bg)}
+.cl-beauty-visual>img{display:block;position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:58% 32%;border:0;z-index:1;animation:cl-beauty-photo .7s ease both}
+.cl-beauty-visual::after{content:'';position:absolute;inset:0;z-index:2;pointer-events:none;border:0;background:linear-gradient(90deg,var(--hero-bg) 0%,color-mix(in srgb,var(--hero-bg) 96%,transparent) 9%,color-mix(in srgb,var(--hero-bg) 56%,transparent) 32%,transparent 61%),linear-gradient(0deg,#171217a8 0%,transparent 43%)}
+.cl-beauty-copy{text-align:left;position:relative;z-index:3;width:55%;padding:52px clamp(28px,4vw,66px);animation:cl-beauty-copy .55s ease both}
+.cl-beauty-eyebrow{display:flex;align-items:center;gap:12px;font-size:10px;font-weight:650;letter-spacing:.15em;line-height:1.5;color:var(--hero-muted)}
+.cl-beauty-eyebrow i{width:25px;height:2px;background:currentColor;flex-shrink:0}
+.cl-beauty-copy h1{font-family:inherit;white-space:pre-line;font-weight:800;font-size:clamp(44px,5.1vw,79px);letter-spacing:-.06em;line-height:1.02;color:var(--hero-ink);margin:30px 0 21px;overflow-wrap:break-word;max-width:100%}
+.cl-beauty-copy>p{font-size:14px;line-height:1.8;color:var(--hero-muted);max-width:340px;margin:0 0 28px}
+.cl-beauty-cta{display:inline-flex;align-items:center;justify-content:center;gap:20px;max-width:100%;min-height:48px;padding:14px 23px;border-radius:3px;border:1px solid var(--hero-action);background:var(--hero-action);color:var(--hero-action-ink);text-decoration:none;font-size:12px;font-weight:700;line-height:1.4;transition:transform .2s,box-shadow .2s}
+.cl-beauty-cta svg{flex-shrink:0;transition:transform .2s}
+.cl-beauty-signature{display:flex;align-items:center;margin-top:29px;padding-left:3px;gap:0;color:var(--hero-muted)}
+.cl-beauty-signature>span{display:block;width:18px;height:18px;margin-left:-3px;border:2px solid var(--hero-bg);border-radius:50%;background:#b792a2}.cl-beauty-signature>span:nth-child(2){background:#dcc2d0}.cl-beauty-signature>span:nth-child(3){background:#edb7cd}.cl-beauty-signature small{font-size:10px;margin-left:12px}
+.cl-beauty-stamp{position:absolute;right:28px;top:28px;z-index:3;display:flex;align-items:center;justify-content:center;gap:6px;width:84px;height:84px;border-radius:50%;color:#171217;background:#f3b8d0;font-size:29px;font-weight:800;letter-spacing:-2px;transform:rotate(10deg)}
+.cl-beauty-stamp>span{border-left:1px solid #915370;padding-left:5px;font-size:6px;line-height:1.2;letter-spacing:0;font-weight:700}
+.cl-beauty-caption{position:absolute;z-index:3;right:35px;left:43%;bottom:28px;text-align:right;color:white;display:flex;flex-direction:column;gap:10px;text-shadow:0 1px 8px #17121765}
+.cl-beauty-caption strong{font-size:17px;line-height:1.35;letter-spacing:-.025em;font-weight:600}.cl-beauty-caption>span{font-size:7px;letter-spacing:.15em;color:#ffe8f2}
+.cl-beauty-controls{display:flex;position:relative;z-index:4;min-height:68px;background:#fff;border:1px solid var(--cl-line,#eed4df);border-top:0;color:#171217}
+.cl-beauty-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));flex:1;min-width:0}.cl-beauty-tabs button{appearance:none;position:relative;display:flex;align-items:center;gap:15px;padding:15px 27px;min-height:68px;background:#fff;color:#171217;border:0;border-right:1px solid var(--cl-line,#eed4df);font-family:inherit;font-size:12px;line-height:1.2;cursor:pointer;transition:background .2s}
+.cl-beauty-tabs button.active{background:#f9dfeb}.cl-beauty-tabs button.active::before{content:'';position:absolute;bottom:0;left:0;right:0;height:3px;background:#b0507c}.cl-beauty-tabs small{font-size:10px;color:#84566d}.cl-beauty-tabs svg{margin-left:auto}
+.cl-beauty-playback{display:flex;align-items:center;justify-content:center;gap:0;padding:0 13px}.cl-beauty-playback button{appearance:none;display:flex;align-items:center;justify-content:center;width:44px;height:44px;border:0;background:transparent;color:#171217;cursor:pointer;border-radius:3px}.cl-beauty-playback button:disabled{opacity:.4;cursor:default}
+.cl-beauty-hero button:focus-visible,.cl-beauty-cta:focus-visible{outline:3px solid #b34f7c;outline-offset:-3px}
+.cl-beauty-art{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 70% 32%,#8d5378,transparent 66%),linear-gradient(140deg,#312135,#1a111d);overflow:hidden}.cl-beauty-art>span{font-size:clamp(150px,25vw,360px);font-weight:800;letter-spacing:-.12em;line-height:1;color:#f5cbdf45;transform:rotate(-12deg);margin-right:14%}.cl-beauty-art>i{position:absolute;width:84%;aspect-ratio:1;border:1px solid #f4bbd633;border-radius:50%;right:-15%;top:-25%}.cl-beauty-art>i+i{top:20%;right:-25%;width:74%}.cl-beauty-art small{position:absolute;right:35px;top:49%;font-size:9px;letter-spacing:.2em;color:#fff6;writing-mode:vertical-rl}
+@media (hover:hover) and (prefers-reduced-motion:no-preference){.cl-beauty-cta:hover{transform:translateY(-2px);box-shadow:0 9px 24px #0f09121f}.cl-beauty-cta:hover svg{transform:translate(2px,-2px)}.cl-beauty-tabs button:hover,.cl-beauty-playback button:hover{background:#fae6ef}}
+@media(min-width:1800px){.cl-beauty-stage{min-height:620px}}
+@media(max-width:1100px) and (min-width:768px){.cl-beauty-stage{min-height:515px}.cl-beauty-copy{width:58%;padding:36px}.cl-beauty-copy h1{font-size:clamp(41px,5.6vw,60px)}.cl-beauty-copy>p{max-width:290px;font-size:13px}.cl-beauty-tabs button{padding:13px 18px}.cl-beauty-stamp{width:72px;height:72px;font-size:26px}}
+@media(max-width:767px){
+ .cl-beauty-hero{width:calc(100% - 24px)}.cl-beauty-stage{min-height:0;display:flex;flex-direction:column;align-items:stretch}
+ .cl-beauty-visual{position:relative;inset:auto;order:0;width:100%;height:clamp(225px,62vw,355px);flex:none}
+ .cl-beauty-visual>img{object-position:55% 32%;animation:none}.cl-beauty-visual::after{background:linear-gradient(180deg,transparent 38%,color-mix(in srgb,var(--hero-bg) 25%,transparent) 58%,var(--hero-bg) 100%)}
+ .cl-beauty-copy{order:1;width:100%;min-height:0;margin-top:-35px;padding:0 24px 30px;background:transparent}
+ .cl-beauty-eyebrow{font-size:9px;letter-spacing:.13em;gap:10px}.cl-beauty-copy h1{font-size:clamp(37px,10.3vw,58px);max-width:12ch;line-height:1.02;margin:19px 0 15px;letter-spacing:-.055em}
+ .cl-beauty-copy>p{font-size:12px;line-height:1.7;max-width:400px;margin:0 0 22px}.cl-beauty-cta{font-size:12px;min-height:46px;padding:13px 18px;gap:18px}
+ .cl-beauty-signature{display:none}.cl-beauty-stamp{width:67px;height:67px;top:17px;right:17px;font-size:25px}.cl-beauty-stamp>span{font-size:5px}.cl-beauty-caption{display:none}
+ .cl-beauty-controls{min-height:58px}.cl-beauty-tabs button{min-height:58px;padding:11px 8px;gap:6px;font-size:11px;justify-content:center}.cl-beauty-tabs small{font-size:9px}.cl-beauty-tabs svg{display:none}
+ .cl-beauty-playback{padding:0 3px}.cl-beauty-playback button{width:40px;min-height:44px}.cl-beauty-step{display:none!important}.cl-beauty-art>span{font-size:190px}.cl-beauty-art small{display:none}
+}
+@media(max-width:370px){.cl-beauty-copy{padding:0 19px 26px}.cl-beauty-copy h1{font-size:37px}.cl-beauty-tabs button{font-size:10px;gap:4px}.cl-beauty-tabs small{display:none}}
+@keyframes cl-beauty-copy{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes cl-beauty-photo{from{opacity:.4;transform:scale(1.025)}to{opacity:1;transform:scale(1)}}
+@media(prefers-reduced-motion:reduce){.cl-beauty-hero *{animation:none!important;transition:none!important;scroll-behavior:auto!important}.cl-beauty-cta:hover{transform:none}}

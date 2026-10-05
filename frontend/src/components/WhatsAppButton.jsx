@@ -1,3 +1,4 @@
+import { MessageCircle } from 'lucide-react';
 import { motion } from "framer-motion";
 
 function WhatsAppButton() {
@@ -19,7 +20,7 @@ function WhatsAppButton() {
 
       rel="noreferrer"
 
-      className="whatsapp-btn"
+      className="whatsapp-float" aria-label="Consultar por WhatsApp"
 
       whileHover={{
         scale: 1.08
@@ -30,7 +31,7 @@ function WhatsAppButton() {
       }}
     >
 
-      💬
+      <MessageCircle size={22} />
 
     </motion.a>
 

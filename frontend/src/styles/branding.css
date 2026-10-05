@@ -1,0 +1,32 @@
+/* ColorLenses 3.0.1 · approved rose-heart identity */
+.cl-brand-logo {display:inline-block;position:relative;flex:none;width:220px;max-width:100%;vertical-align:middle;line-height:0;letter-spacing:normal}
+.cl-brand-logo img {display:block;width:100%;height:auto;max-width:none;max-height:none;object-fit:contain}
+.cl-brand-logo--compact {width:160px}
+.cl-logo:has(.cl-brand-logo) {display:inline-flex;align-items:center;flex:none;line-height:0;letter-spacing:normal}
+.cl-logo .cl-brand-logo img {max-width:none;max-height:none}
+.cl-navbar .cl-brand-logo {width:215px}
+.cl-footer .cl-brand-logo {width:270px}
+.cl-login-story .cl-brand-logo {width:285px}
+html body .cl-admin-sidebar .cl-admin-brand {padding-inline:2px}
+.cl-admin-brand .cl-brand-logo {width:100%;max-width:214px}
+.cl-admin-topbar>.cl-admin-brandline {display:flex;align-items:center;gap:18px;min-width:0}
+.cl-admin-brandline>a {display:flex;align-items:center;line-height:0;min-width:0;flex-shrink:1}
+.cl-admin-brandline small {white-space:nowrap}
+.sidebar-header .cl-brand-logo {width:205px;max-width:100%}
+.sidebar-header>div {min-width:0}
+.sidebar-header .sidebar-close {flex:none}
+.card-logo .cl-brand-logo {width:260px;max-width:100%}
+.cl-modal-head .cl-brand-logo {width:150px;margin-bottom:12px}
+.cl-beauty-art .cl-brand-logo {width:55%;max-width:420px;transform:none;margin:0;opacity:.75}
+@media(max-width:1100px) and (min-width:768px){.cl-navbar .cl-brand-logo{width:185px}.cl-admin-brandline small{font-size:8px}}
+@media(max-width:767px){
+  .cl-navbar .cl-brand-logo{width:190px}
+  .cl-footer .cl-brand-logo{width:255px}
+  .cl-login-story .cl-brand-logo{width:235px}
+  .cl-admin-topbar>.cl-admin-brandline{gap:0;flex:1}
+  .cl-admin-brandline .cl-brand-logo{width:155px;max-width:100%}
+  .cl-admin-topbar>.cl-admin-brandline small{display:none}
+  .cl-admin-topbar>div{max-width:94px}
+  .cl-beauty-art .cl-brand-logo{width:68%;margin-bottom:140px}
+}
+@media(max-width:370px){.cl-navbar .cl-brand-logo{width:168px}.cl-admin-brandline .cl-brand-logo{width:127px}.sidebar-header .cl-brand-logo{width:185px}}
