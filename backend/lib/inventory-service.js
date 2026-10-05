@@ -3,6 +3,7 @@ const { randomUUID } = require('node:crypto');
 const { assertTransactional } = require('./schema-check');
 const { AppError, text, codeValue, positiveInteger, requestKey, sameBrand, transaction, assertBrandUnlocked } = require('./inventory-core');
 const { parseScope, scopeFromSession, scopeLabel, decorateSession, sameScope, scopePredicate, assertInScope } = require('./inventory-scope');
+const { canonicalReceiptProduct, matchesRecordedProduct } = require('./inventory-receipt');
 const VARIANT_SELECT = `SELECT v.Id AS ProductVariantId, p.Id AS ProductId,
  p.SKU, p.Marca, p.Modelo, p.Category, p.Description, p.Image, p.Image2, p.Image3,
  v.Color, CASE WHEN d.ProductVariantId IS NOT NULL AND d.ReviewedAt IS NULL THEN NULL ELSE v.Power END AS Power,
@@ -162,18 +163,34 @@ function createService(db) {
     }
     return { found:!!p, code:clean, product:p, scopeError };
   }
-  async function createDraft(c,code,brand,sid) {
+  async function createDraft(c,code,brand,sid,details) {
     // El código NO contiene información fiable de marca, modelo o graduación.
-    // Solo se usa la marca seleccionada; el resto queda inactivo y pendiente.
+    // En recepción se capturan los datos físicos. Las fotos se completan en Productos.
+    // El inventario completo conserva su tratamiento de códigos desconocidos.
     const sku='CLP-'+randomUUID().replace(/-/g,'').slice(0,20);
     const [limits]=await c.execute('SELECT COLUMN_NAME,CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\'ProductVariants\' AND COLUMN_NAME IN (\'ScanCode\',\'FactoryCode\')');
     if(limits.some(l=>l.CHARACTER_MAXIMUM_LENGTH && code.length>Number(l.CHARACTER_MAXIMUM_LENGTH)))throw new AppError('El código supera el tamaño permitido por la tabla actual. No se truncó ni se creó un código distinto. Amplía las columnas de códigos antes de usar este QR.',400,'CODE_TOO_LONG');
-    const [p] = await c.execute(`INSERT INTO Products (SKU,Category,Marca,Modelo,Description,Image,Status) VALUES (?,?,?,?,?,?,?)`,
-      [sku,'',brand,'Pendiente '+code.slice(0,60),'Creado por inventario. Completar categoría, modelo, color, graduación y precio antes de publicar.','','Inactivo']);
+    let productId;
+    if(details) {
+      const [bases]=await c.execute('SELECT Id FROM Products WHERE LOWER(TRIM(Marca))=LOWER(TRIM(?)) AND LOWER(TRIM(Category))=LOWER(TRIM(?)) AND LOWER(TRIM(Modelo))=LOWER(TRIM(?)) ORDER BY Id LIMIT 2',[brand,details.category,details.model]);
+      if(bases.length>1)throw new AppError('Hay varios productos base con esos datos. Revisa los duplicados en Productos antes de recibir este código.',409,'AMBIGUOUS_PRODUCT');
+      productId=bases[0]?.Id;
+      if(productId) {
+        const [variants]=await c.execute('SELECT Id FROM ProductVariants WHERE ProductId=? AND LOWER(TRIM(Color))=LOWER(TRIM(?)) AND Power=? LIMIT 1',[productId,details.color,details.power]);
+        if(variants.length)throw new AppError('Esta variante ya existe con otro código. Revisa o agrega el código en Productos y vuelve a escanear; no se creó un duplicado ni se sumó stock.',409,'VARIANT_ALREADY_EXISTS');
+      }
+    }
+    if(!productId) {
+      const [p] = await c.execute(`INSERT INTO Products (SKU,Category,Marca,Modelo,Description,Image,Status) VALUES (?,?,?,?,?,?,?)`,
+        [sku,details?.category||'',brand,details?.model||'Pendiente '+code.slice(0,60),details?'Creado en recepción con datos capturados. Fotos pendientes.':'Creado por inventario. Completar categoría, modelo, color, graduación y precio antes de publicar.','','Inactivo']);
+      productId=p.insertId;
+    }
     const [v] = await c.execute(`INSERT INTO ProductVariants (ProductId,Color,Power,PowerLabel,Price,Stock,FactoryCode,InternalCode,ScanCode,CodeType,Status) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [p.insertId,'',0,'Por confirmar',0,0,code,'',code,'BARCODE','Inactivo']);
+      [productId,details?.color||'',details?.power??0,details?.powerLabel||'Por confirmar',details?.price||0,0,code,'',code,'BARCODE','Inactivo']);
     await c.execute('INSERT INTO CLInventoryDrafts (ProductVariantId,SessionId,Code,CreatedAt) VALUES (?,?,?,UTC_TIMESTAMP(3))',[v.insertId,sid,code]);
-    const [rows] = await c.execute(VARIANT_SELECT+' WHERE v.Id=?',[v.insertId]); return rows[0];
+    const [rows] = await c.execute(VARIANT_SELECT+' WHERE v.Id=?',[v.insertId]);
+    // La captura conserva la potencia elegida, aunque el producto espere publicación.
+    return details?{...rows[0],Power:details.power}:rows[0];
   }
   async function add(id,input,user) {
     const code=codeValue(input.code), quantity=positiveInteger(input.quantity), key=requestKey(input.requestKey);
@@ -183,16 +200,21 @@ function createService(db) {
       const [prior]=await c.execute('SELECT * FROM CLInventoryLines WHERE SessionId=? AND RequestKey=?',[id,key]);
       if (prior.length) {
         if (prior[0].Code !== code || Number(prior[0].Quantity) !== quantity) throw new AppError('Esta operación ya se guardó con otros datos.',409,'IDEMPOTENCY_CONFLICT');
+        if(input.newProduct&&!matchesRecordedProduct(prior[0],input.newProduct,input.brand||header.Brand))throw new AppError('Esta operación ya se guardó con otros datos del producto.',409,'IDEMPOTENCY_CONFLICT');
         return { line:prior[0], replayed:true };
       }
       if(header.Status !== 'ACTIVE') throw new AppError('El inventario no está activo. Reanúdalo antes de agregar productos.',409,'NOT_ACTIVE');
       let product=await getVariant(c,code,true);
       if (header.Kind==='STOCKTAKE') assertInScope(product,header);
+      // No aplicar un alta a un código que apareció mientras se capturaban sus datos.
+      // Un reintento ya guardado se recupera en la rama idempotente anterior.
+      if(product&&input.newProduct)throw new AppError('Este código ya fue registrado. Vuelve a buscarlo para revisar el producto existente y agregar únicamente su cantidad.',409,'PRODUCT_NOW_EXISTS');
+      const details=!product&&header.Kind==='RECEIPT'?await canonicalReceiptProduct(c,input.newProduct,input.brand||header.Brand):null;
       let brand=product?.Marca || header.Brand;
       if (!product && header.Kind==='RECEIPT') brand=await canonicalBrand(c,input.brand || header.Brand,true);
       if (!product && !brand) throw new AppError('Selecciona la marca para registrar este código nuevo.');
       await assertBrandUnlocked(c,brand,header.Kind==='STOCKTAKE'?id:'');
-      if (!product) product=await createDraft(c,code,brand,id);
+      if (!product) product=await createDraft(c,code,brand,id,details);
       const before=Number(product.Stock), after=before+quantity;
       if(!Number.isSafeInteger(before) || before<0 || !Number.isSafeInteger(after) || after>2147483647) throw new AppError('El stock está fuera del rango permitido. Revisa el producto.');
       await c.execute('UPDATE ProductVariants SET Stock=? WHERE Id=?',[after,product.ProductVariantId]);

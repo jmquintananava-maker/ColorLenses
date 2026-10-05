@@ -349,3 +349,34 @@ html body .admin-header p,.cl-page-heading p{color:#75647e}
 .cl-inventory-scope .cl-check {display:flex;align-items:center;gap:10px;min-height:38px;font-size:14px;cursor:pointer}
 .cl-inventory-scope input[type="checkbox"] {width:18px;height:18px;min-height:18px;flex:0 0 18px;margin:0;padding:0;accent-color:var(--cl-rose)}
 .cl-inventory-scope small {font-size:12px;color:var(--cl-muted)}
+
+/* Recepción rápida: cantidad y acción antes de los datos del alta. */
+html body dialog.cl-capture-new {border:2px solid #d64858}
+html body dialog.cl-capture-new .cl-modal-head {background:#fff1f2;border-color:#efc2c7}
+html body dialog.cl-capture-known {border:2px solid #3b946a}
+html body dialog.cl-capture-known .cl-modal-head {background:#edf8f1;border-color:#c2e4ce}
+.cl-capture-modal .cl-scanner-rest.cl-scan-new,.cl-capture-modal .cl-scanner-rest.cl-scan-known {min-height:130px;padding:18px;border:1px solid;gap:7px}
+.cl-capture-modal .cl-scanner-rest.cl-scan-new {background:#fff1f2;border-color:#eaa5af;color:#ae2f42}
+.cl-capture-modal .cl-scanner-rest.cl-scan-known {background:#edf8f1;border-color:#a5d3b7;color:#28764d}
+.cl-capture-modal .cl-scanner-rest:is(.cl-scan-new,.cl-scan-known) :is(h3,p) {margin:0;color:inherit}
+.cl-capture-modal .cl-scanner-rest:is(.cl-scan-new,.cl-scan-known) button {margin-top:6px;padding:8px 12px;min-height:36px}
+.cl-receipt-action {display:grid;gap:12px;margin:12px 0 18px}
+.cl-receipt-action .cl-field {margin:0}
+.cl-receipt-action .cl-stock-preview {margin:0}
+.cl-receipt-product {min-width:0;margin:0 0 15px;padding:16px;border:1px solid #e7c4cc;border-radius:14px;background:#fffbfc}
+.cl-receipt-product legend {padding:0 6px;font-size:14px;font-weight:600;color:#963449}
+.cl-receipt-product>p {font-size:12px;color:var(--cl-muted);margin:0 0 14px}
+.cl-receipt-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+.cl-receipt-fields .cl-field {min-width:0}
+.cl-receipt-fields :is(input,select) {width:100%;min-width:0}
+html body .cl-capture-modal .cl-field-invalid :is(input,select) {border:2px solid #cb3549;background:#fff3f4;box-shadow:0 0 0 2px #cb354916}
+.cl-capture-modal .cl-field-error {font-size:12px;font-weight:500;color:#b3263c;line-height:1.4}
+@media(max-width:767px) {
+ .cl-capture-modal .cl-capture-grid {gap:16px}
+ .cl-capture-modal .cl-scanner-rest.cl-scan-new,.cl-capture-modal .cl-scanner-rest.cl-scan-known {min-height:100px;padding:12px;gap:4px}
+ .cl-capture-modal .cl-scanner-rest:is(.cl-scan-new,.cl-scan-known)>svg {width:26px;height:26px}
+ .cl-receipt-product {padding:12px}
+ .cl-receipt-fields {gap:0 10px}
+ html body .cl-capture-modal :is(input:not([type='checkbox']),select) {font-size:16px}
+ .cl-receipt-action .cl-stock-preview small {font-size:10px}
+}
