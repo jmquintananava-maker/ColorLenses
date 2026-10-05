@@ -371,6 +371,13 @@ html body dialog.cl-capture-known .cl-modal-head {background:#edf8f1;border-colo
 .cl-receipt-fields :is(input,select) {width:100%;min-width:0}
 html body .cl-capture-modal .cl-field-invalid :is(input,select) {border:2px solid #cb3549;background:#fff3f4;box-shadow:0 0 0 2px #cb354916}
 .cl-capture-modal .cl-field-error {font-size:12px;font-weight:500;color:#b3263c;line-height:1.4}
+.cl-code-association p {overflow-wrap:anywhere}
+.cl-code-association button {margin-top:8px}
+.cl-code-matches {display:grid;gap:12px;margin:12px 0}
+.cl-code-matches h3 {margin:0;font-size:16px}
+.cl-code-matches article {border:1px solid #c2e4ce;background:#edf8f1;border-radius:12px;padding:14px;overflow-wrap:anywhere}
+.cl-code-matches article p {font-size:12px;margin:6px 0}
+.cl-button-row .cl-btn-danger {background:#a72945;color:#fff;border-color:#a72945}
 @media(max-width:767px) {
  .cl-capture-modal .cl-capture-grid {gap:16px}
  .cl-capture-modal .cl-scanner-rest.cl-scan-new,.cl-capture-modal .cl-scanner-rest.cl-scan-known {min-height:100px;padding:12px;gap:4px}

@@ -3,7 +3,9 @@ const { randomUUID } = require('node:crypto');
 const { assertTransactional } = require('./schema-check');
 const { AppError, text, codeValue, positiveInteger, requestKey, sameBrand, transaction, assertBrandUnlocked } = require('./inventory-core');
 const { parseScope, scopeFromSession, scopeLabel, decorateSession, sameScope, scopePredicate, assertInScope } = require('./inventory-scope');
-const { canonicalReceiptProduct, matchesRecordedProduct } = require('./inventory-receipt');
+const { canonicalReceiptProduct, matchesRecordedProduct, variantLinkToken } = require('./inventory-receipt');
+const { codeMatchSql, associateCode } = require('./product-code-aliases');
+const visibleSessionSql="NOT EXISTS (SELECT 1 FROM CLInventoryEvents removed WHERE removed.SessionId=s.Id AND removed.Action='DELETE_RECEIPT')";
 const VARIANT_SELECT = `SELECT v.Id AS ProductVariantId, p.Id AS ProductId,
  p.SKU, p.Marca, p.Modelo, p.Category, p.Description, p.Image, p.Image2, p.Image3,
  v.Color, CASE WHEN d.ProductVariantId IS NOT NULL AND d.ReviewedAt IS NULL THEN NULL ELSE v.Power END AS Power,
@@ -48,7 +50,7 @@ function createService(db) {
     return String(brand.Name || brand.Marca).trim();
   }
   async function session(c, id, forUpdate = false) {
-    const [rows] = await c.execute('SELECT * FROM CLInventorySessions WHERE Id=?' + (forUpdate ? ' FOR UPDATE' : ''), [requestKey(id)]);
+    const [rows] = await c.execute("SELECT * FROM CLInventorySessions WHERE Id=? AND NOT EXISTS (SELECT 1 FROM CLInventoryEvents removed WHERE removed.SessionId=CLInventorySessions.Id AND removed.Action='DELETE_RECEIPT')" + (forUpdate ? ' FOR UPDATE' : ''), [requestKey(id)]);
     if (!rows.length) throw new AppError('No se encontró este inventario.',404,'NOT_FOUND');
     return sessionWithScope(c,rows[0]);
   }
@@ -69,7 +71,7 @@ function createService(db) {
     return scope;
   }
   async function getVariant(c, code, lock = false) {
-    const [rows] = await c.execute(VARIANT_SELECT + ' WHERE v.ScanCode=? OR v.FactoryCode=? OR v.InternalCode=? ORDER BY v.Id LIMIT 3' + (lock ? ' FOR UPDATE' : ''), [code,code,code]);
+    const [rows] = await c.execute(VARIANT_SELECT + ' WHERE '+codeMatchSql+' ORDER BY v.Id LIMIT 3' + (lock ? ' FOR UPDATE' : ''), [code,code,code,code]);
     if (rows.length > 1) throw new AppError('Este código coincide con varias variantes. Corrige los códigos duplicados en Productos antes de inventariar; no se eligió ninguna automáticamente.',409,'AMBIGUOUS_CODE',rows.map(p => ({ id:p.ProductVariantId, marca:p.Marca, modelo:p.Modelo, power:p.PowerLabel })));
     return rows[0] || null;
   }
@@ -95,7 +97,7 @@ function createService(db) {
       const map = new Map(); [...(sets[0] || []),...rows].forEach(b => {const name=String(b.Name || b.Marca || '').trim(); if(name) map.set(name.toLocaleLowerCase('es'),name);});
       const [categories] = await c.execute("SELECT DISTINCT p.Marca,p.Category FROM Products p JOIN ProductVariants v ON v.ProductId=p.Id WHERE p.Marca IS NOT NULL AND TRIM(p.Marca)<>'' AND p.Category IS NOT NULL AND TRIM(p.Category)<>'' ORDER BY p.Marca,p.Category");
       const [open] = await c.execute("SELECT s.Id,s.Folio,s.Kind,s.Brand,s.Status,sc.Categories AS ScopeCategoriesJSON,sc.Graduation AS ScopeGraduation FROM CLInventorySessions s LEFT JOIN CLInventoryScopes sc ON sc.SessionId=s.Id WHERE s.Kind='STOCKTAKE' AND s.Status IN ('ACTIVE','PAUSED') ORDER BY s.CreatedAt");
-      const [stats] = await c.execute("SELECT Kind,Status,COUNT(*) AS Total FROM CLInventorySessions GROUP BY Kind,Status");
+      const [stats] = await c.execute("SELECT Kind,Status,COUNT(*) AS Total FROM CLInventorySessions s WHERE "+visibleSessionSql+" GROUP BY Kind,Status");
       const [pending] = await c.execute('SELECT COUNT(*) AS Total FROM CLInventoryDrafts WHERE ReviewedAt IS NULL');
       return { brands:[...map.values()].sort((a,b)=>a.localeCompare(b,'es')), brandCategories:categories, openStocktakes:open.map(decorateSession), stats, pending:Number(pending[0]?.Total || 0) };
     });
@@ -118,7 +120,7 @@ function createService(db) {
       const [prior] = await c.execute('SELECT * FROM CLInventorySessions WHERE RequestKey=?',[key]);
       if (prior.length) {
         if (prior[0].Kind !== kind || !sameBrand(prior[0].Brand,input.brand || '') || prior[0].Reference !== reference) throw new AppError('La misma operación ya se usó con datos distintos.',409,'IDEMPOTENCY_CONFLICT');
-        const saved=await sessionWithScope(c,prior[0]);
+        const saved=await session(c,prior[0].Id);
         // Reconciliar un inicio previo al parche nunca vuelve a reiniciar existencias.
         if(kind==='STOCKTAKE') {
           const requested=input.scope ? parseScope(input.scope) : saved.LegacyScope ? {categories:null,graduation:'ALL'} : parseScope(input.scope);
@@ -153,6 +155,7 @@ function createService(db) {
   }
   async function lookup(code,id) {
     const clean=codeValue(code); const p=await getVariant(db,clean);
+    if(p){const [aliases]=await db.execute('SELECT Code FROM CLProductCodeAliases WHERE ProductVariantId=? ORDER BY Code',[p.ProductVariantId]);p.CodeAliases=aliases.map(item=>item.Code);}
     let scopeError=null;
     if(id) {
       const header=await session(db,id);
@@ -176,8 +179,15 @@ function createService(db) {
       if(bases.length>1)throw new AppError('Hay varios productos base con esos datos. Revisa los duplicados en Productos antes de recibir este código.',409,'AMBIGUOUS_PRODUCT');
       productId=bases[0]?.Id;
       if(productId) {
-        const [variants]=await c.execute('SELECT Id FROM ProductVariants WHERE ProductId=? AND LOWER(TRIM(Color))=LOWER(TRIM(?)) AND Power=? LIMIT 1',[productId,details.color,details.power]);
-        if(variants.length)throw new AppError('Esta variante ya existe con otro código. Revisa o agrega el código en Productos y vuelve a escanear; no se creó un duplicado ni se sumó stock.',409,'VARIANT_ALREADY_EXISTS');
+        const [variants]=await c.execute('SELECT Id FROM ProductVariants WHERE ProductId=? AND LOWER(TRIM(Color))=LOWER(TRIM(?)) AND Power=? ORDER BY Id LIMIT 10',[productId,details.color,details.power]);
+        if(variants.length) {
+          const matches=[];
+          for(const variant of variants) {
+            const [rows]=await c.execute(VARIANT_SELECT+' WHERE v.Id=?',[variant.Id]);
+            if(rows[0])matches.push({...rows[0],LinkToken:variantLinkToken(rows[0])});
+          }
+          throw new AppError('Encontramos este producto con otro código. Revisa sus datos y confirma para asociar el código escaneado y recibir la cantidad.',409,'VARIANT_ALREADY_EXISTS',{matches});
+        }
       }
     }
     if(!productId) {
@@ -201,10 +211,23 @@ function createService(db) {
       if (prior.length) {
         if (prior[0].Code !== code || Number(prior[0].Quantity) !== quantity) throw new AppError('Esta operación ya se guardó con otros datos.',409,'IDEMPOTENCY_CONFLICT');
         if(input.newProduct&&!matchesRecordedProduct(prior[0],input.newProduct,input.brand||header.Brand))throw new AppError('Esta operación ya se guardó con otros datos del producto.',409,'IDEMPOTENCY_CONFLICT');
+        if(input.existingVariantId&&Number(prior[0].ProductVariantId)!==Number(input.existingVariantId))throw new AppError('Esta operación ya se guardó para otra variante.',409,'IDEMPOTENCY_CONFLICT');
         return { line:prior[0], replayed:true };
       }
       if(header.Status !== 'ACTIVE') throw new AppError('El inventario no está activo. Reanúdalo antes de agregar productos.',409,'NOT_ACTIVE');
       let product=await getVariant(c,code,true);
+      if(input.existingVariantId!=null) {
+        if(header.Kind!=='RECEIPT'||input.confirmLink!==true||input.newProduct)throw new AppError('Confirma la asociación del código con el producto encontrado.',400,'LINK_CONFIRMATION_REQUIRED');
+        const selectedId=positiveInteger(input.existingVariantId,Number.MAX_SAFE_INTEGER);
+        if(product&&Number(product.ProductVariantId)!==selectedId)throw new AppError('El código ya pertenece a otro producto. Vuelve a buscarlo antes de recibir.',409,'CODE_CONFLICT');
+        const [targets]=await c.execute(VARIANT_SELECT+' WHERE v.Id=? FOR UPDATE',[selectedId]);
+        const target=targets[0];
+        if(!target)throw new AppError('El producto seleccionado ya no existe. Vuelve a buscar el código.',404,'NOT_FOUND');
+        if(text(input.linkToken,64)!==variantLinkToken(target))throw new AppError('Los datos del producto cambiaron. Vuelve a buscar el código y revisa la coincidencia.',409,'PRODUCT_CHANGED');
+        await assertBrandUnlocked(c,target.Marca);
+        await associateCode(c,selectedId,code,user);
+        product=target;
+      }
       if (header.Kind==='STOCKTAKE') assertInScope(product,header);
       // No aplicar un alta a un código que apareció mientras se capturaban sus datos.
       // Un reintento ya guardado se recupera en la rama idempotente anterior.
@@ -280,7 +303,7 @@ function createService(db) {
     });
   }
   async function history(q={},exportAll=false) {
-    const params=[]; const where=[];
+    const params=[]; const where=[visibleSessionSql];
     if(['RECEIPT','STOCKTAKE'].includes(q.kind)) {where.push('s.Kind=?');params.push(q.kind);}
     if(['ACTIVE','PAUSED','COMPLETED'].includes(q.status)) {where.push('s.Status=?');params.push(q.status);}
     if(q.search) {const value='%'+text(q.search,190)+'%';where.push('(s.Folio LIKE ? OR s.Reference LIKE ? OR s.Brand LIKE ?)');params.push(value,value,value);}
@@ -318,7 +341,12 @@ function createService(db) {
   }
   return { metadata,preview,create,lookup,add,changeStatus,updateMetadata,voidLine,history,drafts,publishDraft,
     detail:id=>readSnapshot(db,c=>detailFrom(c,id)),
-    allProducts:async()=>{const [rows]=await db.execute(VARIANT_SELECT+' ORDER BY p.Marca,p.Modelo,v.Color,v.Power');return rows;}
+    allProducts:()=>readSnapshot(db,async c=>{
+      const [rows]=await c.execute(VARIANT_SELECT+' ORDER BY p.Marca,p.Modelo,v.Color,v.Power');
+      const [codes]=await c.execute('SELECT Code,ProductVariantId FROM CLProductCodeAliases ORDER BY Code');
+      const aliases=new Map();for(const item of codes){const id=Number(item.ProductVariantId);if(!aliases.has(id))aliases.set(id,[]);aliases.get(id).push(item.Code);}
+      return rows.map(p=>({...p,CodeAliases:aliases.get(Number(p.ProductVariantId))||[]}));
+    })
   };
 }
 module.exports={ createService, VARIANT_SELECT, consolidated, readSnapshot };

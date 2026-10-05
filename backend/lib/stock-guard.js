@@ -1,5 +1,6 @@
 'use strict';
 const { acquireStockLock, releaseStockLock, assertBrandUnlocked, AppError, sendError } = require('./inventory-core');
+const { ensureCodeSchema } = require('./product-code-aliases');
 // Serializa TODOS los cambios de stock del API legado y los nuevos inventarios.
 // El lock pertenece a esta conexión incluso si un SP hace COMMIT internamente.
 module.exports = function stockGuard(db) {
@@ -7,6 +8,8 @@ module.exports = function stockGuard(db) {
     return async (req, res, next) => {
       let connection; let locked = false;
       try {
+        const writesCodes=/^\/api\/product-variants(?:\/\d+)?$/.test(req.path)&&['POST','PUT'].includes(req.method);
+        if(writesCodes)await ensureCodeSchema(db);
         connection = await db.getConnection();
         await acquireStockLock(connection); locked = true;
         const brands = new Set();
@@ -60,6 +63,8 @@ module.exports = function stockGuard(db) {
           for(const code of codes){
             const [duplicates]=await connection.execute('SELECT Id FROM ProductVariants WHERE (ScanCode=? OR FactoryCode=? OR InternalCode=?) AND Id<>? LIMIT 1',[code,code,code,variantId||0]);
             if(duplicates.length)throw new AppError('Este código ya pertenece a otra variante. No se guardó un código duplicado.',409,'DUPLICATE_CODE');
+            const [aliases]=await connection.execute('SELECT ProductVariantId FROM CLProductCodeAliases WHERE Code=? AND ProductVariantId<>? LIMIT 1',[code,variantId||0]);
+            if(aliases.length)throw new AppError('Este código ya está asociado a otra variante. Usa el producto existente.',409,'DUPLICATE_CODE');
           }
         }
         req.stockConnection = connection;

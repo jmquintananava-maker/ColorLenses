@@ -1,4 +1,5 @@
 import { request } from "../../utils/api";
+import { adminProductMode, adminProductsFromRows, lookupAdminProduct, matchesAdminCodeAlias } from "../../utils/adminProducts";
 import ProductFilters, { emptyFilters } from "../../components/ProductFilters";
 import { matchesProduct as matchesProductFilters, categoryKey } from "../../utils/productFilters";
 import { apiFetch as fetch } from "../../utils/api";
@@ -31,13 +32,15 @@ const PAGE_SIZE = 10;
 
 function ProductsAdmin() {
   const [products, setProducts] = useState([]);
+  const [productsError, setProductsError] = useState("");
+  const productsLoadSequence = useRef(0);
 
   const [brands, setBrands] = useState([]);
   const [categories, setCategories] = useState([]);
   const [colors, setColors] = useState([]);
   const [powers, setPowers] = useState([]);
 
-  const [viewMode, setViewMode] = useState(() => new URLSearchParams(window.location.search).get("view") === "pending" ? "pending" : "active");
+  const [viewMode, setViewMode] = useState(() => new URLSearchParams(window.location.search).get("view") === "pending" ? "pending" : "all");
   const [search, setSearch] = useState("");
   const [advancedFilters, setAdvancedFilters] = useState({...emptyFilters});
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -117,12 +120,14 @@ function ProductsAdmin() {
     CodeType: "BARCODE",
     FactoryCode: "",
     InternalCode: "",
-    ScanCode: ""
+    ScanCode: "",
+    CodeAliases: []
   });
 
   useEffect(() => {
     loadProducts();
-  }, [viewMode]);
+    return () => { productsLoadSequence.current += 1; };
+  }, []);
 
   useEffect(() => {
     loadSettingsOptions();
@@ -163,81 +168,6 @@ function ProductsAdmin() {
     return String(image).startsWith("http")
       ? image
       : `${API_URL}${image}`;
-  };
-
-  const normalizeProductVariant = (product) => {
-    return {
-      ...product,
-
-      ProductVariantId:
-        product.ProductVariantId ||
-        product.VariantId ||
-        product.Id,
-
-      ProductId:
-        product.ProductId ||
-        product.ProductID,
-
-      Category:
-        product.Category || "",
-
-      Marca:
-        product.Marca || "",
-
-      Modelo:
-        product.Modelo || "",
-
-      Description:
-        product.Description || "",
-
-      Image:
-        product.Image || "",
-
-      Image2:
-        product.Image2 || "",
-
-      Image3:
-        product.Image3 || "",
-
-      Color:
-        product.Color || "",
-
-      Power:
-        product.Power ?? 0,
-
-      PowerLabel:
-        product.PowerLabel ||
-        (Number(product.Power || 0) === 0
-          ? "Sin graduación"
-          : Number(product.Power || 0).toFixed(2)),
-
-      Price:
-        Number(product.Price || 0),
-
-      Stock:
-        Number(product.Stock || 0),
-
-      FactoryCode:
-        product.FactoryCode || "",
-
-      InternalCode:
-        product.InternalCode || "",
-
-      ScanCode:
-        product.ScanCode ||
-        product.FactoryCode ||
-        product.InternalCode ||
-        "",
-
-      CodeType:
-        product.CodeType || "INTERNAL",
-
-      Status:
-        product.Status || "Activo",
-
-      ProductStatus:
-        product.ProductStatus || "Activo"
-    };
   };
 
   const unlockScanSound = () => {
@@ -342,26 +272,16 @@ function ProductsAdmin() {
   };
 
   const loadProducts = async () => {
+    const sequence = ++productsLoadSequence.current;
+    setProductsError("");
     try {
-      const endpoint =
-        viewMode === "pending"
-          ? `${API_URL}/api/inventory/drafts`
-          : viewMode === "active"
-          ? `${API_URL}/api/product-variants`
-          : `${API_URL}/api/product-variants-inactive`;
-
-      const response = await fetch(endpoint);
-      const data = await response.json();
-
-      const sortedData = Array.isArray(data)
-        ? [...data]
-            .map(normalizeProductVariant)
-            .sort((a, b) => getVariantId(b) - getVariantId(a))
-        : [];
-
-      setProducts(sortedData);
+      const data = await request('/api/inventory/products');
+      const rows = adminProductsFromRows(data);
+      if (sequence === productsLoadSequence.current) setProducts(rows);
     } catch (err) {
-      console.log("❌ Error cargando variantes:", err);
+      if (sequence === productsLoadSequence.current) {
+        setProductsError(err.message || "No se pudo cargar el catálogo completo.");
+      }
     }
   };
 
@@ -383,6 +303,7 @@ function ProductsAdmin() {
     const cleanPowerFilter = normalizeText(powerFilter);
 
     const filtered = products.filter((product) => {
+      if (viewMode !== "all" && adminProductMode(product) !== viewMode) return false;
       const productBrand = normalizeText(product.Marca);
       const productCategory = normalizeText(product.Category);
       const productModel = normalizeText(product.Modelo);
@@ -402,6 +323,7 @@ function ProductsAdmin() {
 
       const matchesSearch =
         !searchText ||
+        matchesAdminCodeAlias(product, searchText) ||
         String(product.ProductVariantId || product.Id || "")
           .toLowerCase()
           .includes(searchText) ||
@@ -466,7 +388,8 @@ function ProductsAdmin() {
     categoryFilter,
     productFilter,
     powerFilter,
-    advancedFilters
+    advancedFilters,
+    viewMode
   ]);
 
   const totalPages = Math.max(
@@ -506,143 +429,29 @@ function ProductsAdmin() {
     setCurrentPage(1);
   };
 
-  const findVariantByCode = (code, list = products) => {
-    const cleanCode = normalizeText(code);
-
-    if (!cleanCode) return null;
-
-    return list.find((product) => {
-      const candidates = [
-        product.ScanCode,
-        product.FactoryCode,
-        product.InternalCode,
-        product.ProductVariantId,
-        product.Id
-      ]
-        .map((value) => normalizeText(value))
-        .filter(Boolean);
-
-      return candidates.some((candidate) => {
-        return candidate === cleanCode || candidate.includes(cleanCode);
-      });
-    });
-  };
-
-  const getApiProductFromResponse = (data) => {
-    if (!data) return null;
-
-    if (Array.isArray(data)) {
-      return data[0] || null;
-    }
-
-    if (data.product) return data.product;
-    if (data.variant) return data.variant;
-    if (data.item) return data.item;
-    if (data.data) return getApiProductFromResponse(data.data);
-
-    return data;
-  };
-
   const searchProductByCode = async (forcedCode = null) => {
     if (isCodeSearching) return;
-
     const cleanCode = String(forcedCode || codeSearch || "").trim();
-
     if (!cleanCode) {
       setCodeSearchMessage("Escribe o escanea un código primero.");
       return;
     }
-
+    setIsCodeSearching(true);
+    setCodeSearchMessage("Buscando producto...");
     try {
-      setIsCodeSearching(true);
-      setCodeSearchMessage("Buscando producto...");
-
-      let foundProduct = findVariantByCode(cleanCode, products);
-
-      if (foundProduct) {
-        setCodeSearchMessage(
-          `✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`
-        );
-
-        editProduct(foundProduct);
-        setIsCodeSearching(false);
-        return;
-      }
-
-      try {
-        const scanResponse = await fetch(
-          `${API_URL}/api/products/scan/${encodeURIComponent(cleanCode)}`
-        );
-
-        const scanData = await scanResponse.json().catch(() => null);
-
-        if (scanResponse.ok) {
-          const apiProduct = getApiProductFromResponse(scanData);
-
-          if (apiProduct) {
-            foundProduct = normalizeProductVariant(apiProduct);
-          }
-        }
-      } catch (err) {
-        console.log("No se encontró con endpoint scan:", err);
-      }
-
-      if (foundProduct && (foundProduct.ProductVariantId || foundProduct.Id)) {
-        setCodeSearchMessage(
-          `✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`
-        );
-
-        editProduct(foundProduct);
-        setIsCodeSearching(false);
-        return;
-      }
-
-      const [activeRes, inactiveRes] = await Promise.all([
-        fetch(`${API_URL}/api/product-variants`),
-        fetch(`${API_URL}/api/product-variants-inactive`)
-      ]);
-
-      const activeData = await activeRes.json();
-      const inactiveData = await inactiveRes.json();
-
-      const activeList = Array.isArray(activeData)
-        ? activeData.map(normalizeProductVariant)
-        : [];
-
-      const inactiveList = Array.isArray(inactiveData)
-        ? inactiveData.map(normalizeProductVariant)
-        : [];
-
-      foundProduct =
-        findVariantByCode(cleanCode, activeList) ||
-        findVariantByCode(cleanCode, inactiveList);
-
+      const foundProduct = await lookupAdminProduct(request, cleanCode);
       if (!foundProduct) {
-        setCodeSearchMessage("No se encontró ningún producto con ese código.");
-        setIsCodeSearching(false);
+        setCodeSearchMessage("Este código todavía no está vinculado a ningún producto. Si conoces el modelo, búscalo en Todos y revisa sus códigos.");
         return;
       }
-
-      const foundIsInactive =
-        String(foundProduct.Status || "Activo") === "Inactivo";
-
-      if (foundIsInactive) {
-        setViewMode("inactive");
-        setProducts(inactiveList.sort((a, b) => getVariantId(b) - getVariantId(a)));
-      } else {
-        setViewMode("active");
-        setProducts(activeList.sort((a, b) => getVariantId(b) - getVariantId(a)));
-      }
-
-      setCodeSearchMessage(
-        `✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`
-      );
-
+      clearFilters();
+      setViewMode("all");
+      setCodeSearch(cleanCode);
+      setCodeSearchMessage(`✅ Producto encontrado: ${foundProduct.Marca} ${foundProduct.Modelo}`);
       editProduct(foundProduct);
-      setIsCodeSearching(false);
     } catch (err) {
-      console.log("❌ Error buscando por código:", err);
       setCodeSearchMessage(err.message || "Error buscando producto por código.");
+    } finally {
       setIsCodeSearching(false);
     }
   };
@@ -833,7 +642,8 @@ function ProductsAdmin() {
   };
 
   const getPowerLabel = (powerValue) => {
-    const cleanPower = Number(powerValue || 0);
+    if (powerValue == null || powerValue === "") return "Por confirmar";
+    const cleanPower = Number(powerValue);
 
     if (cleanPower === 0) {
       return "Sin graduación";
@@ -876,7 +686,7 @@ function ProductsAdmin() {
         Power: value,
         PowerLabel: nextPowerLabel,
         Price:
-          prev.Marca &&
+          value !== "" && prev.Marca &&
           normalizeText(prev.Marca).includes("urban")
             ? getSuggestedPrice(value, prev.Marca)
             : prev.Price
@@ -892,7 +702,7 @@ function ProductsAdmin() {
         ...prev,
         Marca: value,
         Price:
-          normalizeText(value).includes("urban")
+          formData.Power !== "" && normalizeText(value).includes("urban")
             ? cleanPower === 0
               ? 350
               : 700
@@ -965,7 +775,8 @@ function ProductsAdmin() {
       CodeType: "BARCODE",
       FactoryCode: "",
       InternalCode: "",
-      ScanCode: ""
+      ScanCode: "",
+      CodeAliases: []
     });
 
     setEditingVariantId(null);
@@ -1007,6 +818,11 @@ function ProductsAdmin() {
 
     if (!formData.Color) {
       alert("Selecciona un color");
+      return false;
+    }
+
+    if (formData.Power === "" || formData.Power == null || !Number.isFinite(Number(formData.Power))) {
+      alert("Selecciona la graduación. Elige Sin graduación si corresponde.");
       return false;
     }
 
@@ -1128,7 +944,7 @@ function ProductsAdmin() {
         normalizeText(product.Marca) === cleanMarca &&
         normalizeText(product.Modelo) === cleanModelo &&
         normalizeText(product.Color) === cleanColor &&
-        Number(product.Power || 0) === cleanPower
+        product.Power != null && Number(product.Power) === cleanPower
       );
     });
   };
@@ -1341,11 +1157,12 @@ function ProductsAdmin() {
 
   const editProduct = (product) => {
     const variantId = product.ProductVariantId || product.Id;
+    const catalogProduct = products.find(item => String(getVariantId(item)) === String(variantId));
 
     setEditingVariantId(variantId);
     setEditingProductId(product.ProductId);
 
-    const cleanPower = Number(product.Power || 0);
+    const cleanPower = product.Power == null || product.Power === "" ? null : Number(product.Power);
     const isInternal = product.CodeType === "INTERNAL";
 
     setFormData({
@@ -1359,17 +1176,18 @@ function ProductsAdmin() {
       Image3: product.Image3 || "",
 
       Color: product.Color || "",
-      Power: cleanPower.toFixed(2),
+      Power: cleanPower == null ? "" : cleanPower.toFixed(2),
       PowerLabel:
         product.PowerLabel ||
-        (cleanPower === 0 ? "Sin graduación" : cleanPower.toFixed(2)),
-      Price: product.Price || "",
-      Stock: product.Stock || "",
+        (cleanPower == null ? "Por confirmar" : cleanPower === 0 ? "Sin graduación" : cleanPower.toFixed(2)),
+      Price: product.Price ?? "",
+      Stock: product.Stock ?? "",
 
       CodeMode: isInternal ? "INTERNAL" : "FACTORY",
       CodeType: product.CodeType || (isInternal ? "INTERNAL" : "BARCODE"),
       FactoryCode: product.FactoryCode || "",
       InternalCode: product.InternalCode || "",
+      CodeAliases: [...new Set([...(catalogProduct?.CodeAliases || []), ...(product.CodeAliases || [])])],
       ScanCode:
         product.ScanCode ||
         product.FactoryCode ||
@@ -1962,6 +1780,15 @@ function ProductsAdmin() {
 
         <div className="product-mode-buttons">
           <button
+            className={viewMode === "all" ? "product-mode-btn active" : "product-mode-btn"}
+            onClick={() => {
+              setViewMode("all");
+              void closeProductForm();
+              closeGalleryForm();
+              clearFilters();
+            }}
+          >Todos</button>
+          <button
             className={
               viewMode === "active"
                 ? "product-mode-btn active"
@@ -1996,7 +1823,8 @@ function ProductsAdmin() {
           </button>
           <button className={viewMode==='pending'?'product-mode-btn active':'product-mode-btn'} onClick={()=>{setViewMode('pending');clearFilters();void closeProductForm();}}>Pendientes de completar</button>
         </div>
-        {viewMode==='pending' && <div className="cl-alert"><span>Estos códigos se crearon durante un inventario. Conservan su stock, pero no se muestran al público ni se venden. Completa sus datos con Editar y después pulsa Publicar. Una marca en inventario debe finalizarse antes de editar.</span></div>}
+        {productsError && <div className="cl-alert" role="alert"><span>{productsError}</span><button className="cl-btn cl-btn-light" onClick={loadProducts}>Reintentar</button></div>}
+        {viewMode==='pending' && <div className="cl-alert"><span>Estos códigos se crearon durante un inventario o una recepción. Conservan su stock, pero no se muestran al público ni se venden. Completa sus datos con Editar y después pulsa Publicar. Una marca en inventario debe finalizarse antes de editar.</span></div>}
         <div className="cl-admin-filter-toggle"><button className="cl-btn cl-btn-light" onClick={()=>setShowAdvancedFilters(!showAdvancedFilters)}>Filtros múltiples: marcas, colores y graduaciones</button><a className="cl-text-btn" href="/admin/reports/products">Exportar reporte configurable →</a></div>
         {showAdvancedFilters && <div className="cl-panel cl-admin-multifilters"><ProductFilters options={advancedOptions} filters={advancedFilters} onChange={next=>{setAdvancedFilters(next);setCurrentPage(1);}}/></div>}
 
@@ -2246,6 +2074,8 @@ function ProductsAdmin() {
                   value={formData.Power}
                   onChange={handleChange}
                 >
+                  <option value="">Seleccionar graduación</option>
+                  {!powers.some(power => Number(power.Power) === 0) && <option value="0.00">Sin graduación</option>}
                   {powers.map((power) => (
                     <option
                       key={power.Id}
@@ -2326,6 +2156,14 @@ function ProductsAdmin() {
                     value={formData.ScanCode}
                     readOnly
                   />
+                )}
+
+                {formData.CodeAliases.length > 0 && (
+                  <div className="sales-product-empty">
+                    <strong>Códigos adicionales vinculados</strong>
+                    <p>{formData.CodeAliases.join(" · ")}</p>
+                    <small>También identifican esta variante al escanear. El código original se conserva.</small>
+                  </div>
                 )}
 
                 {showCodeScanner && (
@@ -2726,7 +2564,7 @@ function ProductsAdmin() {
                     </td>
 
                     <td data-label="Graduación">
-                      {product.PowerLabel || "Sin graduación"}
+                      {product.PowerLabel || (product.Power == null ? "Por confirmar" : "Sin graduación")}
                     </td>
 
                     <td data-label="Precio">
@@ -2768,7 +2606,7 @@ function ProductsAdmin() {
                     </td>
 
                     <td data-label="Status">
-                      {product.Status || "Activo"}
+                      {adminProductMode(product) === "pending" ? "Pendiente de completar" : adminProductMode(product) === "active" ? "Activo" : "Inactivo"}
                     </td>
 
                     <td data-label="Acciones">
@@ -2789,7 +2627,7 @@ function ProductsAdmin() {
                           <Images size={16} />
                         </button>
 
-                        {viewMode === "pending" || Number(product.NeedsReview) ? (<button className="reactivate-btn" title="Publicar producto revisado" onClick={()=>publishPending(product)}>Publicar</button>) : viewMode === "active" ? (
+                        {adminProductMode(product) === "pending" ? (<button className="reactivate-btn" title="Publicar producto revisado" onClick={()=>publishPending(product)}>Publicar</button>) : adminProductMode(product) === "active" ? (
                           <button
                             className="delete-btn"
                             onClick={() => deleteProduct(variantId)}
@@ -2823,7 +2661,7 @@ function ProductsAdmin() {
                       ? "No se encontraron variantes con esos filtros."
                       : viewMode === "active"
                         ? "No hay variantes activas."
-                        : viewMode === "pending" ? "No hay productos pendientes de completar." : "No hay variantes inactivas."}
+                        : viewMode === "pending" ? "No hay productos pendientes de completar." : viewMode === "all" ? "No hay variantes registradas." : "No hay variantes inactivas."}
                   </td>
                 </tr>
               )}

@@ -12,6 +12,9 @@ const db = require("./db");
 const app = express();
 const { createToken, verifyToken } = require('./lib/auth')(db);
 const withStockLock = require('./lib/stock-guard')(db);
+const productCodeLookup = require('./lib/inventory-service').createService(db);
+const { ensureCodeSchema } = require('./lib/product-code-aliases');
+const { sendError: sendInventoryError } = require('./lib/inventory-core');
 
 /* =========================
    MIDDLEWARES
@@ -774,12 +777,8 @@ app.get("/api/products/qr/:code", async (req, res) => {
       });
     }
 
-    const [rows] = await db.execute(
-      "CALL GetProductByScanCode(?)",
-      [cleanCode]
-    );
-
-    const product = rows[0]?.[0];
+    await ensureCodeSchema(db);
+    const { product } = await productCodeLookup.lookup(cleanCode);
 
     if (!product) {
       return res.status(404).json({
@@ -810,6 +809,7 @@ app.get("/api/products/qr/:code", async (req, res) => {
 
     res.json(product);
   } catch (err) {
+    if (err.status) return sendInventoryError(res, err);
     console.log("❌ Get product by scan code error:", err);
 
     res.status(500).json({
@@ -832,12 +832,8 @@ app.get("/api/products/scan/:code", async (req, res) => {
       });
     }
 
-    const [rows] = await db.execute(
-      "CALL GetProductByScanCode(?)",
-      [cleanCode]
-    );
-
-    const product = rows[0]?.[0];
+    await ensureCodeSchema(db);
+    const { product } = await productCodeLookup.lookup(cleanCode);
 
     if (!product) {
       return res.status(404).json({
@@ -868,6 +864,7 @@ app.get("/api/products/scan/:code", async (req, res) => {
 
     res.json(product);
   } catch (err) {
+    if (err.status) return sendInventoryError(res, err);
     console.log("❌ Scan product error:", err);
 
     res.status(500).json({

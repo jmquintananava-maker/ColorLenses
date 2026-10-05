@@ -3,6 +3,7 @@ const express=require('express');
 const { createService }=require('../lib/inventory-service');
 const { filtersFromQuery,matchesProduct,categoryKey }=require('../lib/product-filters');
 const { sendError }=require('../lib/inventory-core');
+const { ensureCodeSchema }=require('../lib/product-code-aliases');
 const { sendWorkbook,letter }=require('../lib/xlsx');
 const columns=[
  {key:'ScanCode',title:'Código',type:'text',width:28}, {key:'Marca',title:'Marca',width:20}, {key:'Modelo',title:'Modelo',width:30},
@@ -14,7 +15,7 @@ const columns=[
 ];
 module.exports=function reportsRouter(db) {
  const router=express.Router(), service=createService(db);
- const wrap=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){sendError(res,e);}};
+ const wrap=fn=>async(req,res)=>{try{await ensureCodeSchema(db);await fn(req,res);}catch(e){sendError(res,e);}};
  router.get('/products/options',wrap(async(req,res)=>{
   const products=await service.allProducts();
   const unique=key=>[...new Set(products.map(p=>p[key]).filter(v=>v!=='' && v!=null))].sort((a,b)=>String(a).localeCompare(String(b),'es'));

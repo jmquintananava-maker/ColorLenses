@@ -22,6 +22,7 @@ function harness(options={}){
   if(sql.startsWith('SELECT * FROM CLInventoryLines WHERE SessionId='))return [line?[line]:[]];
   if(sql.startsWith('SELECT * FROM CLInventoryBaseline'))return [options.baseline||[]];
   if(sql.startsWith('SELECT * FROM CLInventoryEvents'))return [[]];
+  if(sql.startsWith('SELECT Code FROM CLProductCodeAliases'))return [[]];
   if(sql.startsWith('SELECT DISTINCT Marca'))return [[{Name:args[0]}]];
   if(sql.startsWith('SELECT v.Id AS ProductVariantId'))return [options.ambiguous?[product,{...product,ProductVariantId:2}]:(product?[{...product}]:[])];
   if(sql.startsWith('INSERT INTO Products'))return [{insertId:90}];

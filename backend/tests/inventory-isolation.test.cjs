@@ -38,6 +38,7 @@ function database(failAfterReset=false){
   if(sql.startsWith('UPDATE ProductVariants v JOIN CLInventoryBaseline')){for(const v of variants)if(baseline.some(b=>b.SessionId===args[0]&&b.ProductVariantId===v.Id))v.Stock=0;return [{affectedRows:baseline.length}];}
   if(sql.startsWith('INSERT INTO CLInventoryEvents')){if(failAfterReset&&args[1]==='START_AND_RESET')throw new Error('Fallo simulado después del reinicio');return [{affectedRows:1}];}
   if(sql.startsWith('SELECT v.Id AS ProductVariantId'))return [variants.filter(v=>v.ScanCode===args[0]).map(v=>({...v,Power:v.NeedsReview?null:v.Power}))];
+  if(sql.startsWith('SELECT Code FROM CLProductCodeAliases'))return [[]];
   if(sql.startsWith('SELECT * FROM CLInventoryLines WHERE SessionId=? AND RequestKey'))return [lines.filter(l=>l.RequestKey===args[1])];
   if(sql.startsWith('UPDATE ProductVariants SET Stock=?')){variants.find(v=>v.Id===args[1]).Stock=args[0];return [{affectedRows:1}];}
   if(sql.startsWith('INSERT INTO CLInventoryLines')){lines.push({Id:lines.length+1,SessionId:args[0],RequestKey:args[1],ProductVariantId:args[2],ProductId:args[3],Code:args[4],Quantity:args[5],StockBefore:args[6],StockAfter:args[7],Marca:args[8],Category:args[10],Power:args[12]});return [{insertId:lines.length}];}

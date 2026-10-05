@@ -3,6 +3,8 @@ const express = require('express');
 const { createService } = require('../lib/inventory-service');
 const { sendError } = require('../lib/inventory-core');
 const { ensureScopeSchema } = require('../lib/inventory-scope');
+const { ensureCodeSchema } = require('../lib/product-code-aliases');
+const { createRemovalService } = require('../lib/inventory-removal');
 const { sendWorkbook, letter } = require('../lib/xlsx');
 const labels = { RECEIPT:'Entrada de mercancía', STOCKTAKE:'Inventario completo', ACTIVE:'En curso', PAUSED:'En pausa', COMPLETED:'Finalizado' };
 const col=(key,title,type,width)=>({key,title,type,width});
@@ -34,11 +36,12 @@ function sessionSheets(detail) {
 }
 function dateText(d) { return d instanceof Date ? d.toISOString() : d ? String(d) : ''; }
 module.exports=function inventoryRouter(db) {
-  const router=express.Router(), service=createService(db);
-  const wrap=fn=>async(req,res)=>{try{await ensureScopeSchema(db);await fn(req,res);}catch(e){sendError(res,e);}};
+  const router=express.Router(), service=createService(db), removal=createRemovalService(db);
+  const wrap=fn=>async(req,res)=>{try{await ensureScopeSchema(db);await ensureCodeSchema(db);await fn(req,res);}catch(e){sendError(res,e);}};
   router.get('/meta',wrap(async(req,res)=>res.json(await service.metadata())));
   router.get('/preview',wrap(async(req,res)=>res.json(await service.preview(req.query.brand,{categories:req.query.allCategories==='true'?null:req.query.categories==null?[]:Array.isArray(req.query.categories)?req.query.categories:[req.query.categories],graduation:req.query.graduation}))));
   router.get('/lookup',wrap(async(req,res)=>res.json(await service.lookup(req.query.code,req.query.sessionId))));
+  router.get('/products',wrap(async(req,res)=>res.json(await service.allProducts())));
   router.get('/drafts',wrap(async(req,res)=>res.json(await service.drafts())));
   router.post('/drafts/:id/publish',wrap(async(req,res)=>res.json(await service.publishDraft(req.params.id,req.body,req.user))));
   router.get('/sessions',wrap(async(req,res)=>res.json(await service.history(req.query))));
@@ -52,6 +55,8 @@ module.exports=function inventoryRouter(db) {
     }]);
   }));
   router.patch('/sessions/:id/metadata',wrap(async(req,res)=>res.json(await service.updateMetadata(req.params.id,req.body,req.user))));
+  router.get('/sessions/:id/removal-preview',wrap(async(req,res)=>res.json(await removal.preview(req.params.id))));
+  router.delete('/sessions/:id',wrap(async(req,res)=>res.json(await removal.remove(req.params.id,req.body,req.user))));
   router.get('/sessions/:id',wrap(async(req,res)=>res.json(await service.detail(req.params.id))));
   router.get('/sessions/:id/export',wrap(async(req,res)=>{
     const d=await service.detail(req.params.id); await sendWorkbook(res,`ColorLenses-${d.session.Folio}.xlsx`,sessionSheets(d));

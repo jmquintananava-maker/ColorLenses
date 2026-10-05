@@ -1,5 +1,10 @@
 'use strict';
 const {AppError,text,sameBrand}=require('./inventory-core');
+const {createHash}=require('node:crypto');
+function variantLinkToken(product) {
+  const fields=['ProductVariantId','Marca','Modelo','Category','Color','Power','PowerLabel','Price','NeedsReview','ScanCode','FactoryCode','InternalCode','ProductStatus','VariantStatus'];
+  return createHash('sha256').update(JSON.stringify(fields.map(key=>product[key]??null))).digest('hex');
+}
 function validateReceiptProduct(input,brand) {
   const value=input&&typeof input==='object'&&!Array.isArray(input)?input:{};
   const fields={},data={};
@@ -32,4 +37,4 @@ function matchesRecordedProduct(line,input,brand) {
   const data=validateReceiptProduct(input,brand);
   return sameBrand(line.Marca,data.brand)&&sameBrand(line.Modelo,data.model)&&sameBrand(line.Category,data.category)&&sameBrand(line.Color,data.color)&&line.Power!=null&&Number(line.Power)===data.power&&Number(line.Price)===data.price;
 }
-module.exports={validateReceiptProduct,canonicalReceiptProduct,matchesRecordedProduct};
+module.exports={validateReceiptProduct,canonicalReceiptProduct,matchesRecordedProduct,variantLinkToken};
