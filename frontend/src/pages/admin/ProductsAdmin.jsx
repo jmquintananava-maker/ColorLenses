@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import AdminSidebar from "../../components/AdminSidebar";
+import ProductPhotoStatus from "../../components/ProductPhotoStatus";
 
 const API_URL = (import.meta.env.VITE_API_URL || "");
 
@@ -1823,6 +1824,7 @@ function ProductsAdmin() {
           </button>
           <button className={viewMode==='pending'?'product-mode-btn active':'product-mode-btn'} onClick={()=>{setViewMode('pending');clearFilters();void closeProductForm();}}>Pendientes de completar</button>
         </div>
+        <ProductPhotoStatus />
         {productsError && <div className="cl-alert" role="alert"><span>{productsError}</span><button className="cl-btn cl-btn-light" onClick={loadProducts}>Reintentar</button></div>}
         {viewMode==='pending' && <div className="cl-alert"><span>Estos códigos se crearon durante un inventario o una recepción. Conservan su stock, pero no se muestran al público ni se venden. Completa sus datos con Editar y después pulsa Publicar. Una marca en inventario debe finalizarse antes de editar.</span></div>}
         <div className="cl-admin-filter-toggle"><button className="cl-btn cl-btn-light" onClick={()=>setShowAdvancedFilters(!showAdvancedFilters)}>Filtros múltiples: marcas, colores y graduaciones</button><a className="cl-text-btn" href="/admin/reports/products">Exportar reporte configurable →</a></div>

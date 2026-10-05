@@ -6,6 +6,7 @@ const cors = require("cors");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { createProductMedia, mountProductMedia } = require('./lib/product-media');
 
 const db = require("./db");
 
@@ -54,25 +55,21 @@ app.use('/api/analytics', require('./routes/analytics')(db));
    UPLOADS FOLDER
 ========================= */
 
-const uploadsPath = path.join(__dirname, "uploads");
-const productUploadsPath = path.join(__dirname, "uploads/products");
+const productMedia = createProductMedia(__dirname, process.env.UPLOADS_DIR);
+const productUploadsPath = productMedia.productsDirectory;
+fs.mkdirSync(productUploadsPath, { recursive: true });
+mountProductMedia(app, express, productMedia);
 
-if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath);
-}
-
-if (!fs.existsSync(productUploadsPath)) {
-  fs.mkdirSync(productUploadsPath, {
-    recursive: true
-  });
-}
-
-app.use(
-  "/uploads",
-  express.static(
-    path.join(__dirname, "uploads")
-  )
-);
+// El middleware de autenticación protege esta revisión; no expone rutas al catálogo público.
+app.get('/api/uploads/status', async (req, res) => {
+  try {
+    const [products] = await db.execute('SELECT Id, Marca, Modelo, Image, Image2, Image3 FROM Products ORDER BY Id');
+    res.json(await productMedia.status(products));
+  } catch (error) {
+    console.error('[Product media]', error.code || error.name);
+    res.status(500).json({ message: 'No se pudieron revisar las carpetas de fotos. Revisa los permisos y los registros del servidor.' });
+  }
+});
 
 /* =========================
    HELPERS
