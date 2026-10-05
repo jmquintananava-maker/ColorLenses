@@ -2,15 +2,17 @@
 const express = require('express');
 const { createService } = require('../lib/inventory-service');
 const { sendError } = require('../lib/inventory-core');
+const { ensureScopeSchema } = require('../lib/inventory-scope');
 const { sendWorkbook, letter } = require('../lib/xlsx');
 const labels = { RECEIPT:'Entrada de mercancía', STOCKTAKE:'Inventario completo', ACTIVE:'En curso', PAUSED:'En pausa', COMPLETED:'Finalizado' };
 const col=(key,title,type,width)=>({key,title,type,width});
 const baseColumns=[col('Code','Código','text',28),col('Marca','Marca',null,20),col('Modelo','Modelo',null,30),col('Category','Categoría',null,18),col('Color','Color',null,16),col('PowerLabel','Graduación',null,18)];
 function sessionSheets(detail) {
   const {session:s,summary,lines,products,events}=detail;
-  const subtitle=`${s.Folio} · ${s.Brand || 'Varias marcas'} · ${labels[s.Status]} · ${s.Reference || 'Sin referencia'}`;
+  const subtitle=`${s.Folio} · ${s.Brand || 'Varias marcas'}${s.ScopeLabel?' · '+s.ScopeLabel:''} · ${labels[s.Status]} · ${s.Reference || 'Sin referencia'}`;
   const sheets=[{name:'Resumen',title:labels[s.Kind],subtitle,columns:[col('name','Concepto',null,36),col('value','Valor',null,40)],rows:[
     {name:'Folio',value:s.Folio},{name:'Tipo',value:labels[s.Kind]},{name:'Estado',value:labels[s.Status]},{name:'Marca',value:s.Brand || 'Varias marcas'},
+    {name:'Alcance del conteo',value:s.ScopeLabel || 'No aplica'},
     {name:'Referencia / proveedor',value:s.Reference},{name:'Notas',value:s.Notes},{name:'Creado por',value:s.CreatedByName},
     {name:'Creación',value:dateText(s.CreatedAt)},{name:'Finalización',value:dateText(s.CompletedAt)},
     {name:'Unidades registradas',value:summary.TotalUnits},{name:'Variantes registradas',value:summary.TotalProducts},
@@ -33,10 +35,10 @@ function sessionSheets(detail) {
 function dateText(d) { return d instanceof Date ? d.toISOString() : d ? String(d) : ''; }
 module.exports=function inventoryRouter(db) {
   const router=express.Router(), service=createService(db);
-  const wrap=fn=>async(req,res)=>{try{await fn(req,res);}catch(e){sendError(res,e);}};
+  const wrap=fn=>async(req,res)=>{try{await ensureScopeSchema(db);await fn(req,res);}catch(e){sendError(res,e);}};
   router.get('/meta',wrap(async(req,res)=>res.json(await service.metadata())));
-  router.get('/preview',wrap(async(req,res)=>res.json(await service.preview(req.query.brand))));
-  router.get('/lookup',wrap(async(req,res)=>res.json(await service.lookup(req.query.code))));
+  router.get('/preview',wrap(async(req,res)=>res.json(await service.preview(req.query.brand,{categories:req.query.allCategories==='true'?null:req.query.categories==null?[]:Array.isArray(req.query.categories)?req.query.categories:[req.query.categories],graduation:req.query.graduation}))));
+  router.get('/lookup',wrap(async(req,res)=>res.json(await service.lookup(req.query.code,req.query.sessionId))));
   router.get('/drafts',wrap(async(req,res)=>res.json(await service.drafts())));
   router.post('/drafts/:id/publish',wrap(async(req,res)=>res.json(await service.publishDraft(req.params.id,req.body,req.user))));
   router.get('/sessions',wrap(async(req,res)=>res.json(await service.history(req.query))));
@@ -45,7 +47,7 @@ module.exports=function inventoryRouter(db) {
     const history=await service.history(req.query,true);
     await sendWorkbook(res,'ColorLenses-Historial-'+new Date().toISOString().slice(0,10)+'.xlsx',[{
       name:'Historial',title:'ColorLenses · Historial de inventarios',subtitle:`${history.total} registros · Fechas UTC · Los filtros de pantalla se aplican a este reporte.`,
-      columns:[col('Folio','Folio','text',30),col('KindLabel','Tipo',null,26),col('Brand','Marca',null,20),col('Reference','Referencia / proveedor',null,32),col('StatusLabel','Estado',null,18),col('TotalProducts','Variantes','number',15),col('TotalUnits','Unidades','number',15),col('CreatedByName','Creado por',null,25),col('CreatedAt','Creación UTC','text',28),col('CompletedAt','Finalización UTC','text',28)],
+      columns:[col('Folio','Folio','text',30),col('KindLabel','Tipo',null,26),col('Brand','Marca',null,20),col('ScopeLabel','Alcance',null,44),col('Reference','Referencia / proveedor',null,32),col('StatusLabel','Estado',null,18),col('TotalProducts','Variantes','number',15),col('TotalUnits','Unidades','number',15),col('CreatedByName','Creado por',null,25),col('CreatedAt','Creación UTC','text',28),col('CompletedAt','Finalización UTC','text',28)],
       rows:history.sessions.map(s=>({...s,Brand:s.Brand || 'Varias marcas',KindLabel:labels[s.Kind],StatusLabel:labels[s.Status],TotalProducts:Number(s.TotalProducts),TotalUnits:Number(s.TotalUnits),CreatedAt:dateText(s.CreatedAt),CompletedAt:dateText(s.CompletedAt)})),totals:['TotalUnits']
     }]);
   }));

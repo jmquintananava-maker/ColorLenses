@@ -342,3 +342,10 @@ html body .admin-header p,.cl-page-heading p{color:#75647e}
 @media(max-width:767px){.cl-discover .cl-section-heading{flex-direction:row;align-items:flex-end}.cl-discover .cl-section-heading h2{font-size:32px}.cl-discover .cl-section-heading .cl-underlined-link{font-size:9px;gap:3px}.cl-beauty-tabs button{min-height:65px}.cl-catalog-toolbar .cl-search{background:#fff}.cl-catalog-toolbar .cl-search input{font-size:16px}}
 
 .cl-beauty-visual:has(>img) .cl-beauty-art{visibility:hidden}
+
+/* Alcance del inventario: categorías de la marca y graduación. */
+.cl-inventory-scope {border:1px solid #dfd7e5;border-radius:14px;padding:14px 16px;margin:0 0 18px;display:grid;gap:8px}
+.cl-inventory-scope legend {padding:0 6px;font-size:13px;font-weight:600;color:var(--cl-ink)}
+.cl-inventory-scope .cl-check {display:flex;align-items:center;gap:10px;min-height:38px;font-size:14px;cursor:pointer}
+.cl-inventory-scope input[type="checkbox"] {width:18px;height:18px;min-height:18px;flex:0 0 18px;margin:0;padding:0;accent-color:var(--cl-rose)}
+.cl-inventory-scope small {font-size:12px;color:var(--cl-muted)}

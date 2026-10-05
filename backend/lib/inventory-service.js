@@ -2,6 +2,7 @@
 const { randomUUID } = require('node:crypto');
 const { assertTransactional } = require('./schema-check');
 const { AppError, text, codeValue, positiveInteger, requestKey, sameBrand, transaction, assertBrandUnlocked } = require('./inventory-core');
+const { parseScope, scopeFromSession, scopeLabel, decorateSession, sameScope, scopePredicate, assertInScope } = require('./inventory-scope');
 const VARIANT_SELECT = `SELECT v.Id AS ProductVariantId, p.Id AS ProductId,
  p.SKU, p.Marca, p.Modelo, p.Category, p.Description, p.Image, p.Image2, p.Image3,
  v.Color, CASE WHEN d.ProductVariantId IS NOT NULL AND d.ReviewedAt IS NULL THEN NULL ELSE v.Power END AS Power,
@@ -48,7 +49,23 @@ function createService(db) {
   async function session(c, id, forUpdate = false) {
     const [rows] = await c.execute('SELECT * FROM CLInventorySessions WHERE Id=?' + (forUpdate ? ' FOR UPDATE' : ''), [requestKey(id)]);
     if (!rows.length) throw new AppError('No se encontró este inventario.',404,'NOT_FOUND');
-    return rows[0];
+    return sessionWithScope(c,rows[0]);
+  }
+  async function sessionWithScope(c,header) {
+    const [rows] = await c.execute('SELECT Categories AS ScopeCategoriesJSON,Graduation AS ScopeGraduation FROM CLInventoryScopes WHERE SessionId=?',[header.Id]);
+    return decorateSession({...header,...rows[0]});
+  }
+  async function canonicalScope(c,brand,input) {
+    const scope=parseScope(input);
+    if (scope.categories !== null) {
+      const [rows] = await c.execute('SELECT DISTINCT Category FROM Products WHERE LOWER(TRIM(Marca))=LOWER(TRIM(?))',[brand]);
+      scope.categories=scope.categories.map(name=>{
+        const found=rows.find(p=>sameBrand(p.Category,name));
+        if (!found) throw new AppError(`La categoría ${name} no existe en ${brand}. Actualiza la selección.`,400,'INVALID_CATEGORY');
+        return String(found.Category).trim();
+      });
+    }
+    return scope;
   }
   async function getVariant(c, code, lock = false) {
     const [rows] = await c.execute(VARIANT_SELECT + ' WHERE v.ScanCode=? OR v.FactoryCode=? OR v.InternalCode=? ORDER BY v.Id LIMIT 3' + (lock ? ' FOR UPDATE' : ''), [code,code,code]);
@@ -75,51 +92,75 @@ function createService(db) {
       const [sets] = await c.execute('CALL GetProductBrands()');
       const [rows] = await c.execute('SELECT DISTINCT Marca AS Name FROM Products WHERE Marca IS NOT NULL AND TRIM(Marca)<>\'\'');
       const map = new Map(); [...(sets[0] || []),...rows].forEach(b => {const name=String(b.Name || b.Marca || '').trim(); if(name) map.set(name.toLocaleLowerCase('es'),name);});
-      const [open] = await c.execute("SELECT Id,Folio,Brand,Status FROM CLInventorySessions WHERE Kind='STOCKTAKE' AND Status IN ('ACTIVE','PAUSED') ORDER BY CreatedAt");
+      const [categories] = await c.execute("SELECT DISTINCT p.Marca,p.Category FROM Products p JOIN ProductVariants v ON v.ProductId=p.Id WHERE p.Marca IS NOT NULL AND TRIM(p.Marca)<>'' AND p.Category IS NOT NULL AND TRIM(p.Category)<>'' ORDER BY p.Marca,p.Category");
+      const [open] = await c.execute("SELECT s.Id,s.Folio,s.Kind,s.Brand,s.Status,sc.Categories AS ScopeCategoriesJSON,sc.Graduation AS ScopeGraduation FROM CLInventorySessions s LEFT JOIN CLInventoryScopes sc ON sc.SessionId=s.Id WHERE s.Kind='STOCKTAKE' AND s.Status IN ('ACTIVE','PAUSED') ORDER BY s.CreatedAt");
       const [stats] = await c.execute("SELECT Kind,Status,COUNT(*) AS Total FROM CLInventorySessions GROUP BY Kind,Status");
       const [pending] = await c.execute('SELECT COUNT(*) AS Total FROM CLInventoryDrafts WHERE ReviewedAt IS NULL');
-      return { brands:[...map.values()].sort((a,b)=>a.localeCompare(b,'es')), openStocktakes:open, stats, pending:Number(pending[0]?.Total || 0) };
+      return { brands:[...map.values()].sort((a,b)=>a.localeCompare(b,'es')), brandCategories:categories, openStocktakes:open.map(decorateSession), stats, pending:Number(pending[0]?.Total || 0) };
     });
   }
-  async function preview(brand) {
+  async function preview(brand,inputScope) {
     return readSnapshot(db, async c => {
       const canonical = await canonicalBrand(c,brand,true);
-      const [rows] = await c.execute(`SELECT COUNT(*) AS Variants,COALESCE(SUM(v.Stock),0) AS Units FROM ProductVariants v JOIN Products p ON p.Id=v.ProductId WHERE LOWER(TRIM(p.Marca))=LOWER(TRIM(?))`,[canonical]);
+      const scope=await canonicalScope(c,canonical,inputScope), predicate=scopePredicate(canonical,scope);
+      const [rows] = await c.execute(`SELECT COUNT(*) AS Variants,COALESCE(SUM(v.Stock),0) AS Units FROM ProductVariants v JOIN Products p ON p.Id=v.ProductId WHERE ${predicate.sql}`,predicate.params);
       await assertBrandUnlocked(c,canonical);
-      return { brand:canonical, variants:Number(rows[0].Variants), units:Number(rows[0].Units) };
+      return { brand:canonical, scope, scopeLabel:scopeLabel(scope), variants:Number(rows[0].Variants), units:Number(rows[0].Units) };
     });
   }
   async function create(input,user) {
     const kind = text(input.kind,20);
     if (!['RECEIPT','STOCKTAKE'].includes(kind)) throw new AppError('Tipo de inventario inválido.');
-    if (kind === 'STOCKTAKE' && input.confirmReset !== true) throw new AppError('Debes confirmar que la marca se pondrá en cero.');
+    if (kind === 'STOCKTAKE' && input.confirmReset !== true) throw new AppError('Debes confirmar que el alcance seleccionado se pondrá en cero.');
     const key = requestKey(input.requestKey), reference = text(input.reference || '',190), notes = text(input.notes || '',2000,true);
     return transaction(db, async c => {
       const [prior] = await c.execute('SELECT * FROM CLInventorySessions WHERE RequestKey=?',[key]);
       if (prior.length) {
         if (prior[0].Kind !== kind || !sameBrand(prior[0].Brand,input.brand || '') || prior[0].Reference !== reference) throw new AppError('La misma operación ya se usó con datos distintos.',409,'IDEMPOTENCY_CONFLICT');
-        return { session:prior[0], replayed:true };
+        const saved=await sessionWithScope(c,prior[0]);
+        // Reconciliar un inicio previo al parche nunca vuelve a reiniciar existencias.
+        if(kind==='STOCKTAKE') {
+          const requested=input.scope ? parseScope(input.scope) : saved.LegacyScope ? {categories:null,graduation:'ALL'} : parseScope(input.scope);
+          if(!sameScope(scopeFromSession(saved),requested)) throw new AppError('La misma operación ya se usó con otro alcance.',409,'IDEMPOTENCY_CONFLICT');
+        }
+        return { session:saved, replayed:true };
       }
       await assertTransactional(c);
       const brand = await canonicalBrand(c,input.brand,kind === 'STOCKTAKE');
       if (brand) await assertBrandUnlocked(c,brand);
+      const scope=kind==='STOCKTAKE' ? await canonicalScope(c,brand,input.scope) : null;
+      const predicate=scope && scopePredicate(brand,scope);
+      if(scope) {
+        const [rows]=await c.execute(`SELECT COUNT(*) AS Variants FROM ProductVariants v JOIN Products p ON p.Id=v.ProductId WHERE ${predicate.sql}`,predicate.params);
+        if(!Number(rows[0].Variants)) throw new AppError('No hay variantes en este alcance. No se modificó ninguna existencia.',409,'EMPTY_SCOPE');
+      }
       const id = randomUUID(); const folio = `${kind === 'STOCKTAKE'?'INV':'REC'}-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${id.slice(0,8).toUpperCase()}`;
       await c.execute(`INSERT INTO CLInventorySessions (Id,Folio,RequestKey,Kind,Brand,Reference,Notes,CreatedBy,CreatedByName,CreatedAt,UpdatedAt)
        VALUES (?,?,?,?,?,?,?,?,?,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))`,[id,folio,key,kind,brand,reference,notes,user.id,actorName(user)]);
       if (kind === 'STOCKTAKE') {
+        await c.execute('INSERT INTO CLInventoryScopes (SessionId,Categories,Graduation) VALUES (?,?,?)',[id,scope.categories===null?null:JSON.stringify(scope.categories),scope.graduation]);
         // Snapshot y reset están en la MISMA conexión y transacción. No se borran productos.
         await c.execute(`INSERT INTO CLInventoryBaseline (SessionId,ProductVariantId,ProductId,Code,Marca,Modelo,Category,Color,Power,PowerLabel,Price,StockBefore,VariantStatus,ProductStatus)
           SELECT ?,v.Id,p.Id,COALESCE(NULLIF(v.ScanCode,''),NULLIF(v.FactoryCode,''),v.InternalCode,''),COALESCE(p.Marca,''),COALESCE(p.Modelo,''),COALESCE(p.Category,''),COALESCE(v.Color,''),v.Power,COALESCE(v.PowerLabel,''),COALESCE(v.Price,0),COALESCE(v.Stock,0),COALESCE(v.Status,''),COALESCE(p.Status,'')
-          FROM ProductVariants v JOIN Products p ON p.Id=v.ProductId WHERE LOWER(TRIM(p.Marca))=LOWER(TRIM(?))`,[id,brand]);
-        await c.execute(`UPDATE ProductVariants v JOIN Products p ON p.Id=v.ProductId SET v.Stock=0 WHERE LOWER(TRIM(p.Marca))=LOWER(TRIM(?))`,[brand]);
+          FROM ProductVariants v JOIN Products p ON p.Id=v.ProductId WHERE ${predicate.sql}`,[id,...predicate.params]);
+        // Reiniciar exactamente las variantes incluidas en la fotografía del alcance.
+        await c.execute('UPDATE ProductVariants v JOIN CLInventoryBaseline b ON b.ProductVariantId=v.Id SET v.Stock=0 WHERE b.SessionId=?',[id]);
       }
       await event(c,id,kind === 'STOCKTAKE'?'START_AND_RESET':'START',user);
       return { session:await session(c,id), replayed:false };
     });
   }
-  async function lookup(code) {
+  async function lookup(code,id) {
     const clean=codeValue(code); const p=await getVariant(db,clean);
-    return { found:!!p, code:clean, product:p };
+    let scopeError=null;
+    if(id) {
+      const header=await session(db,id);
+      if(header.Kind==='STOCKTAKE') {
+        try { assertInScope(p,header); }
+        catch(error) { if(!error.status)throw error; scopeError=error.message; }
+      }
+    }
+    return { found:!!p, code:clean, product:p, scopeError };
   }
   async function createDraft(c,code,brand,sid) {
     // El código NO contiene información fiable de marca, modelo o graduación.
@@ -146,7 +187,7 @@ function createService(db) {
       }
       if(header.Status !== 'ACTIVE') throw new AppError('El inventario no está activo. Reanúdalo antes de agregar productos.',409,'NOT_ACTIVE');
       let product=await getVariant(c,code,true);
-      if (product && header.Kind==='STOCKTAKE' && !sameBrand(product.Marca,header.Brand)) throw new AppError(`El código pertenece a ${product.Marca}, no a ${header.Brand}. No se modificó ninguna cantidad.`,409,'WRONG_BRAND');
+      if (header.Kind==='STOCKTAKE') assertInScope(product,header);
       let brand=product?.Marca || header.Brand;
       if (!product && header.Kind==='RECEIPT') brand=await canonicalBrand(c,input.brand || header.Brand,true);
       if (!product && !brand) throw new AppError('Selecciona la marca para registrar este código nuevo.');
@@ -228,11 +269,11 @@ function createService(db) {
       const [counts]=await c.execute('SELECT COUNT(*) AS Total FROM CLInventorySessions s'+clause,params);
       const total=Number(counts[0].Total);
       if(exportAll && total>100000) throw new AppError('Acota el periodo antes de exportar más de 100,000 sesiones.');
-      const [rows]=await c.query(`SELECT s.*,
+      const [rows]=await c.query(`SELECT s.*,sc.Categories AS ScopeCategoriesJSON,sc.Graduation AS ScopeGraduation,
         (SELECT COALESCE(SUM(l.Quantity),0) FROM CLInventoryLines l WHERE l.SessionId=s.Id AND l.VoidedAt IS NULL) AS TotalUnits,
         (SELECT COUNT(DISTINCT l.ProductVariantId) FROM CLInventoryLines l WHERE l.SessionId=s.Id AND l.VoidedAt IS NULL) AS TotalProducts
-        FROM CLInventorySessions s ${clause} ORDER BY s.CreatedAt DESC LIMIT ? OFFSET ?`,[...params,exportAll?100000:25,exportAll?0:(page-1)*25]);
-      return { sessions:rows,total,page,pageSize:25 };
+        FROM CLInventorySessions s LEFT JOIN CLInventoryScopes sc ON sc.SessionId=s.Id ${clause} ORDER BY s.CreatedAt DESC LIMIT ? OFFSET ?`,[...params,exportAll?100000:25,exportAll?0:(page-1)*25]);
+      return { sessions:rows.map(decorateSession),total,page,pageSize:25 };
     });
   }
   async function drafts() {const [rows]=await db.execute(VARIANT_SELECT+' WHERE d.ReviewedAt IS NULL AND d.ProductVariantId IS NOT NULL ORDER BY v.Id DESC');return rows;}

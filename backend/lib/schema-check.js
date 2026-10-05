@@ -5,7 +5,7 @@ const expected={
  ProductVariants:['Id','ProductId','Color','Power','PowerLabel','Price','Stock','FactoryCode','InternalCode','ScanCode','CodeType','Status']
 };
 async function inspectSchema(db,includeInventory=true){
- const names=[...Object.keys(expected),...(includeInventory?['CLInventorySessions','CLInventoryBaseline','CLInventoryLines','CLInventoryDrafts','CLInventoryEvents']:[])];
+ const names=[...Object.keys(expected),...(includeInventory?['CLInventorySessions','CLInventoryBaseline','CLInventoryLines','CLInventoryDrafts','CLInventoryEvents','CLInventoryScopes']:[])];
  const [tables]=await db.query('SELECT TABLE_NAME,ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('+names.map(()=>'?').join(',')+')',names);
  const errors=[];
  for(const name of names){const table=tables.find(t=>t.TABLE_NAME===name);if(!table)errors.push('Falta la tabla '+name);else if(String(table.ENGINE).toUpperCase()!=='INNODB')errors.push(name+' debe usar InnoDB para garantizar reversión de operaciones.');}
@@ -16,7 +16,7 @@ async function inspectSchema(db,includeInventory=true){
  return {ok:!errors.length,errors,tables,columns};
 }
 async function assertTransactional(c){
- const names=['Products','ProductVariants','CLInventorySessions','CLInventoryBaseline','CLInventoryLines','CLInventoryDrafts','CLInventoryEvents'];
+ const names=['Products','ProductVariants','CLInventorySessions','CLInventoryBaseline','CLInventoryLines','CLInventoryDrafts','CLInventoryEvents','CLInventoryScopes'];
  const [rows]=await c.query('SELECT TABLE_NAME,ENGINE FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('+names.map(()=>'?').join(',')+')',names);
  if(names.some(n=>!rows.some(r=>r.TABLE_NAME===n&&String(r.ENGINE).toUpperCase()==='INNODB')))throw new AppError('No es seguro modificar inventario: instala la migración y verifica que Products, ProductVariants y las tablas CLInventory usen InnoDB. Ejecuta npm run check:db.',503,'SCHEMA_NOT_READY');
 }
