@@ -16,6 +16,7 @@ const withStockLock = require('./lib/stock-guard')(db);
 const productCodeLookup = require('./lib/inventory-service').createService(db);
 const { ensureCodeSchema } = require('./lib/product-code-aliases');
 const { sendError: sendInventoryError } = require('./lib/inventory-core');
+const customerContacts = require('./lib/customer-contacts').createCustomerContacts(db);
 
 /* =========================
    MIDDLEWARES
@@ -907,10 +908,10 @@ app.get("/api/customers", async (req, res) => {
         "CALL GetCustomers()"
       );
 
-    res.json(rows[0]);
+    res.json(await customerContacts.includeContacts(rows[0]));
   } catch (err) {
     console.log("❌ Get customers error:", err);
-    res.status(500).json(err);
+    sendInventoryError(res, err);
   }
 });
 
@@ -920,34 +921,24 @@ app.get("/api/customers", async (req, res) => {
 
 app.post("/api/customers", async (req, res) => {
   try {
-    const {
-      FullName,
-      Phone,
-      Email,
-      Notes,
-      CardSlug,
-      QRCode
-    } = req.body;
-
-    await db.execute(
-      "CALL CreateCustomer(?,?,?,?,?,?)",
-      [
-        safeString(FullName),
-        safeString(Phone),
-        safeString(Email),
-        safeString(Notes),
-        safeString(CardSlug),
-        safeString(QRCode)
-      ]
-    );
+    const customer = await customerContacts.create(req.body);
 
     res.json({
       success: true,
-      message: "✅ Cliente creado"
+      message: "✅ Cliente creado", customer
     });
   } catch (err) {
     console.log("❌ Create customer error:", err);
-    res.status(500).json(err);
+    sendInventoryError(res, err);
+  }
+});
+
+app.post("/api/customers/quick", async (req, res) => {
+  try {
+    const result = await customerContacts.quickCreate(req.body);
+    res.status(result.repeated ? 200 : 201).json({ success: true, ...result });
+  } catch (err) {
+    sendInventoryError(res, err);
   }
 });
 
@@ -959,38 +950,7 @@ app.put("/api/customers/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const {
-      FullName,
-      Phone,
-      Email,
-      Notes,
-      CardSlug,
-      QRCode,
-      Status,
-      Points,
-      Level
-    } = req.body;
-
-    await db.execute(
-      "CALL UpdateCustomer(?,?,?,?,?,?,?,?,?,?)",
-      [
-        id,
-        safeString(FullName),
-        safeString(Phone),
-        safeString(Email),
-        safeString(Notes),
-        safeString(CardSlug),
-        safeString(QRCode),
-        safeString(Status || "Activo"),
-        safeNumber(Points),
-        safeString(Level || "Silver")
-      ]
-    );
-
-    await db.execute(
-      "CALL RecalculateCustomerPoints(?)",
-      [id]
-    );
+    await customerContacts.update(id, req.body);
 
     res.json({
       success: true,
@@ -998,7 +958,7 @@ app.put("/api/customers/:id", async (req, res) => {
     });
   } catch (err) {
     console.log("❌ Update customer error:", err);
-    res.status(500).json(err);
+    sendInventoryError(res, err);
   }
 });
 
@@ -1038,10 +998,10 @@ app.get("/api/customers-inactive", async (req, res) => {
         "CALL GetInactiveCustomers()"
       );
 
-    res.json(rows[0]);
+    res.json(await customerContacts.includeContacts(rows[0]));
   } catch (err) {
     console.log("❌ Get inactive customers error:", err);
-    res.status(500).json(err);
+    sendInventoryError(res, err);
   }
 });
 

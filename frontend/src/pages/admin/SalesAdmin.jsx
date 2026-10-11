@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import SaleProductScanner from "../../components/sales/SaleProductScanner";
+import CustomerCreateModal from "../../components/customers/CustomerCreateModal";
 
 import AdminSidebar from "../../components/AdminSidebar";
 
@@ -32,6 +33,7 @@ function SalesAdmin() {
 
   const [customers, setCustomers] =
     useState([]);
+  const [showCustomerCreate, setShowCustomerCreate] = useState(false);
 
   const [products, setProducts] =
     useState([]);
@@ -522,6 +524,9 @@ function SalesAdmin() {
           .toLowerCase()
           .includes(searchText) ||
         String(customer.Phone || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.WhatsApp || "")
           .toLowerCase()
           .includes(searchText) ||
         String(customer.Email || "")
@@ -1167,16 +1172,19 @@ function SalesAdmin() {
         {/* CUSTOMER */}
 
         <div className="admin-form-card">
-          <h2>
-            Cliente
-          </h2>
+          <div className="cl-customer-heading">
+            <h2>Cliente</h2>
+            <button type="button" className="admin-add-btn" onClick={() => setShowCustomerCreate(true)}>
+              <Plus size={18}/> Agregar cliente
+            </button>
+          </div>
 
           <div className="sales-customer-search-box">
             <Search size={18} />
 
             <input
               type="text"
-              placeholder="Buscar cliente por nombre, teléfono, correo o nivel..."
+              placeholder="Buscar cliente por nombre, teléfono, WhatsApp o nivel..."
               value={customerSearch}
               onChange={(e) => {
                 setCustomerSearch(
@@ -1787,6 +1795,12 @@ function SalesAdmin() {
         )}
       </main>
       {showProductScanner&&<SaleProductScanner onClose={closeProductScanner} onProduct={handleScannedProduct}/>}
+      {showCustomerCreate && <CustomerCreateModal onClose={() => setShowCustomerCreate(false)} onCreated={customer => {
+        setCustomers(current => [customer, ...current.filter(item => String(item.Id) !== String(customer.Id))]);
+        setSelectedCustomer(String(customer.Id));
+        setCustomerSearch(customer.FullName);
+        setShowCustomerCreate(false);
+      }}/>}
     </div>
   );
 }

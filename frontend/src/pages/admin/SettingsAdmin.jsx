@@ -631,23 +631,23 @@ function SettingsAdmin() {
           <h2>{tabTitle[activeTab]}</h2>
 
           <div className="admin-table-wrapper settings-table-wrapper">
-            <table className="admin-table">
+            <table role="table" className="admin-table">
               <thead>
                 {activeTab !== "banners" ? (
                   <tr>
-                    <th>ID</th>
-                    <th>Nombre</th>
-                    <th>Status</th>
-                    <th>Acciones</th>
+                    <th scope="col">ID</th>
+                    <th scope="col">Nombre</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Acciones</th>
                   </tr>
                 ) : (
                   <tr>
-                    <th>Imagen</th>
-                    <th>Título</th>
-                    <th>Botón</th>
-                    <th>Orden</th>
-                    <th>Status</th>
-                    <th>Acciones</th>
+                    <th scope="col">Imagen</th>
+                    <th scope="col">Título</th>
+                    <th scope="col">Botón</th>
+                    <th scope="col">Orden</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Acciones</th>
                   </tr>
                 )}
               </thead>

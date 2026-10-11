@@ -2509,21 +2509,21 @@ function ProductsAdmin() {
         </div>
 
         <div className="admin-table-wrapper">
-          <table className="admin-table">
+          <table role="table" className="admin-table">
             <thead>
               <tr>
-                <th>Imagen</th>
-                <th>Marca</th>
-                <th>Producto</th>
-                <th>Color</th>
-                <th>Categoría</th>
-                <th>Graduación</th>
-                <th>Precio</th>
-                <th>Stock</th>
-                <th>Código</th>
-                <th>Tipo</th>
-                <th>Status</th>
-                <th>Acciones</th>
+                <th scope="col">Imagen</th>
+                <th scope="col">Marca</th>
+                <th scope="col">Producto</th>
+                <th scope="col">Color</th>
+                <th scope="col">Categoría</th>
+                <th scope="col">Graduación</th>
+                <th scope="col">Precio</th>
+                <th scope="col">Stock</th>
+                <th scope="col">Código</th>
+                <th scope="col">Tipo</th>
+                <th scope="col">Status</th>
+                <th scope="col">Acciones</th>
               </tr>
             </thead>
 

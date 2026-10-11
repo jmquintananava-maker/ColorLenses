@@ -1,0 +1,72 @@
+/* Alta rápida compartida entre Ventas y Clientes. */
+.cl-customer-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
+.cl-customer-heading h2 { margin:0 !important; }
+html body dialog.cl-customer-modal { width:min(520px, calc(100% - 24px)); }
+.cl-customer-form { display:grid; gap:20px; }
+.cl-customer-defaults { margin:0; color:#786777; font-size:13px; }
+.cl-customer-field { display:grid; gap:8px; min-width:0; }
+.cl-customer-field label { font-weight:650; font-size:14px; color:#302538; }
+html body .cl-customer-field input { width:100%; min-width:0; padding:14px 16px; font-size:16px; border:1px solid #dfd6e4; border-radius:14px; }
+html body .cl-customer-field input[aria-invalid="true"] { border:2px solid #bb244b !important; background:#fff3f5 !important; }
+.cl-field-error { margin:0; color:#b22247; font-size:13px; }
+.cl-customer-help { display:grid; gap:6px; color:#786777; font-size:13px; line-height:1.5; }
+.cl-customer-help button { justify-self:start; }
+.cl-customer-form-actions { display:flex; justify-content:flex-end; gap:10px; padding-top:4px; }
+
+/* En móvil cada fila conserva TODOS sus campos y acciones como tarjeta. */
+@media (max-width:767px) {
+  html body .admin-page .admin-content { min-width:0; max-width:100%; }
+  html body .admin-page :is(.admin-table-wrapper,.cl-table-wrap) {
+    width:100%; max-width:100%; min-width:0; overflow:visible !important;
+    border:0 !important; background:transparent !important; box-shadow:none !important;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) {
+    display:block !important; width:100% !important; max-width:100%; min-width:0 !important;
+    background:transparent !important; border:0 !important;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) thead {
+    display:block !important; position:absolute; width:1px; height:1px; padding:0;
+    margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) tbody {
+    display:grid !important; gap:14px; width:100%; min-width:0;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) tbody tr {
+    display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 14px;
+    width:100%; min-width:0; padding:18px !important; border:1px solid #e6dfe9 !important;
+    border-radius:18px; background:#fff !important; box-shadow:0 4px 16px #30253805;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) tbody td {
+    display:block !important; min-width:0; max-width:100%; padding:0 !important; border:0 !important;
+    text-align:left !important; white-space:normal !important; overflow-wrap:anywhere;
+    font-size:14px; line-height:1.55; background:transparent !important;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) tbody td::before {
+    display:block !important; content:attr(data-label) !important; margin-bottom:5px;
+    font-size:10px; font-weight:700; line-height:1.4; letter-spacing:.07em; text-transform:uppercase; color:#947b9b;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) td:is([colspan],
+    [data-label="Cliente"],[data-label="Producto"],[data-label="Imagen"],[data-label="Modelo / código"],
+    [data-label="Código / producto"],[data-label="Folio / referencia"],[data-label="Email"],
+    [data-label="Tarjeta"],[data-label="Acciones"]) { grid-column:1 / -1; }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) td[data-label="Cliente"] {
+    order:-1; font-size:18px; font-weight:650; color:#302538;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) td :is(a,code,small,strong,span) {
+    max-width:100%; overflow-wrap:anywhere; white-space:normal;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) td small { display:block; }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) td[data-label="Acciones"] {
+    border-top:1px solid #eee7f0 !important; padding-top:12px !important;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) :is(.admin-actions,.cl-table-actions) {
+    display:flex; flex-wrap:wrap; justify-content:flex-start; gap:10px;
+  }
+  html body .admin-page table:is(.admin-table,.cl-data-table,.cl-report-table) td[data-label="Acciones"] :is(button,a) {
+    min-width:44px; min-height:44px; display:inline-flex; align-items:center; justify-content:center;
+  }
+  html body .admin-page .cl-customer-heading { flex-wrap:wrap; }
+  html body .admin-page .cl-customer-heading .admin-add-btn { min-height:44px; font-size:13px; padding:10px 14px; }
+  .cl-customer-form-actions { display:grid; grid-template-columns:1fr 1fr; }
+  .cl-customer-form-actions button { min-width:0; min-height:48px; }
+}

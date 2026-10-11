@@ -29,3 +29,4 @@ ReactDOM.createRoot(
 // ColorLenses Contemporary 3.0: capa visual compartida.
 import "./styles/contemporary.css";
 import "./styles/branding.css";
+import "./styles/admin-mobile.css";

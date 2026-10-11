@@ -1,3 +1,4 @@
+import { whatsAppNumber } from './customerContacts';
 /* =========================
    SEND WHATSAPP
 ========================= */
@@ -21,24 +22,8 @@ const sendWhatsApp = (
      CLEAN PHONE
   ========================= */
 
-  let phone =
-
-    customer.Phone || "";
-
-  phone =
-    phone.replace(/\D/g, "");
-
-  /* =========================
-     ADD MX PREFIX
-  ========================= */
-
-  if (
-    !phone.startsWith("52")
-  ) {
-
-    phone = `52${phone}`;
-
-  }
+  const phone = whatsAppNumber(customer);
+  if (!phone) return;
 
   /* =========================
      PRODUCTS

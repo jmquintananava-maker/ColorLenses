@@ -11,12 +11,14 @@ import {
 } from "lucide-react";
 
 import AdminSidebar from "../../components/AdminSidebar";
+import CustomerCreateModal from "../../components/customers/CustomerCreateModal";
 
 const API_URL = (import.meta.env.VITE_API_URL || "");
 
 const emptyForm = {
   FullName: "",
   Phone: "",
+  WhatsApp: "",
   Email: "",
   Notes: "",
   CardSlug: "",
@@ -34,6 +36,7 @@ function CustomersAdmin() {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     getCustomers();
@@ -69,6 +72,9 @@ function CustomersAdmin() {
           .toLowerCase()
           .includes(searchText) ||
         String(customer.Phone || "")
+          .toLowerCase()
+          .includes(searchText) ||
+        String(customer.WhatsApp || "")
           .toLowerCase()
           .includes(searchText) ||
         String(customer.Email || "")
@@ -130,13 +136,15 @@ function CustomersAdmin() {
   const openCreateForm = () => {
     setForm(emptyForm);
     setEditingId(null);
-    setShowForm(true);
+    setShowForm(false);
+    setShowCreateModal(true);
   };
 
   const openEditForm = (customer) => {
     setForm({
       FullName: customer.FullName || "",
       Phone: customer.Phone || "",
+      WhatsApp: customer.WhatsApp || customer.Phone || "",
       Email: customer.Email || "",
       Notes: customer.Notes || "",
       CardSlug: customer.CardSlug || "",
@@ -351,10 +359,15 @@ function CustomersAdmin() {
 
               <input
                 name="Phone"
+                type="tel"
+                aria-label="Teléfono"
                 placeholder="Teléfono"
                 value={form.Phone}
                 onChange={handleChange}
               />
+
+              <input name="WhatsApp" type="tel" aria-label="WhatsApp" placeholder="WhatsApp"
+                maxLength={30} value={form.WhatsApp} onChange={handleChange}/>
 
               <input
                 name="Email"
@@ -447,20 +460,21 @@ function CustomersAdmin() {
         </div>
 
         <div className="admin-table-wrapper">
-          <table className="admin-table">
+          <table role="table" className="admin-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Cliente</th>
-                <th>Teléfono</th>
-                <th>Email</th>
-                <th>Puntos</th>
-                <th>Nivel</th>
-                <th>Gastado</th>
-                <th>Visitas</th>
-                <th>Tarjeta</th>
-                <th>Status</th>
-                <th>Acciones</th>
+                <th scope="col">ID</th>
+                <th scope="col">Cliente</th>
+                <th scope="col">Teléfono</th>
+                <th scope="col">WhatsApp</th>
+                <th scope="col">Email</th>
+                <th scope="col">Puntos</th>
+                <th scope="col">Nivel</th>
+                <th scope="col">Gastado</th>
+                <th scope="col">Visitas</th>
+                <th scope="col">Tarjeta</th>
+                <th scope="col">Status</th>
+                <th scope="col">Acciones</th>
               </tr>
             </thead>
 
@@ -472,6 +486,7 @@ function CustomersAdmin() {
                   <td data-label="Cliente">{customer.FullName}</td>
 
                   <td data-label="Teléfono">{customer.Phone}</td>
+                  <td data-label="WhatsApp">{customer.WhatsApp || customer.Phone || '—'}</td>
 
                   <td data-label="Email">{customer.Email}</td>
 
@@ -497,6 +512,7 @@ function CustomersAdmin() {
                     <div className="admin-actions">
                       <button
                         className="edit-btn"
+                        aria-label={`Editar a ${customer.FullName}`}
                         onClick={() => openEditForm(customer)}
                       >
                         <Pencil size={16} />
@@ -505,6 +521,7 @@ function CustomersAdmin() {
                       {viewMode === "active" ? (
                         <button
                           className="delete-btn"
+                          aria-label={`Desactivar a ${customer.FullName}`}
                           onClick={() => deleteCustomer(customer.Id)}
                         >
                           <Trash2 size={16} />
@@ -525,7 +542,7 @@ function CustomersAdmin() {
 
               {filteredCustomers.length === 0 && (
                 <tr>
-                  <td colSpan="11" data-label="Clientes">
+                  <td colSpan="12" data-label="Clientes">
                     {search
                       ? "No se encontraron clientes con esa búsqueda."
                       : viewMode === "active"
@@ -538,6 +555,12 @@ function CustomersAdmin() {
           </table>
         </div>
       </main>
+      {showCreateModal && <CustomerCreateModal onClose={() => setShowCreateModal(false)} onCreated={customer => {
+        setShowCreateModal(false);
+        setSearch('');
+        setCustomers(current => viewMode === 'active' ? [customer, ...current.filter(item => item.Id !== customer.Id)] : [customer]);
+        if (viewMode !== 'active') setViewMode('active');
+      }}/>}
     </div>
   );
 }
